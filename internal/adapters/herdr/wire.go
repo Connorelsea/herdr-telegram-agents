@@ -141,6 +141,25 @@ type paneReadResult struct {
 	} `json:"read"`
 }
 
+// paneGetResult is the part of the pane.get result ReadScreen needs: the
+// scroll metrics, absent when Herdr has none for the pane.
+type paneGetResult struct {
+	Type string `json:"type"`
+	Pane struct {
+		Scroll *paneScroll `json:"scroll"`
+	} `json:"pane"`
+}
+
+type paneScroll struct {
+	OffsetFromBottom    int `json:"offset_from_bottom"`
+	MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
+	ViewportRows        int `json:"viewport_rows"`
+}
+
+type paneTargetParams struct {
+	PaneID string `json:"pane_id"`
+}
+
 // Request params for the agent and notification methods.
 type readParams struct {
 	Target    string `json:"target"`

@@ -210,6 +210,25 @@ func (g *Gateway) ReadScreen(ctx context.Context, target string, source domain.S
 	}, nil
 }
 
+// ReadLimit is how many lines Herdr can serve for the pane from what it
+// holds: the visible rows plus its own scrollback. A deeper read makes Herdr
+// scroll the application itself to recover older lines, which the user sees
+// as the pane jumping up and back; a fullscreen TUI such as Claude Code keeps
+// no Herdr scrollback, so any read past its screen does this. ok is false
+// when pane.get fails or reports no scroll metrics.
+func (g *Gateway) ReadLimit(ctx context.Context, paneID string) (int, bool) {
+	var res paneGetResult
+	if err := g.call(ctx, "pane.get", paneID, paneTargetParams{PaneID: paneID}, &res); err != nil {
+		g.log.Debug("herdr pane scroll unavailable", slog.String("target", paneID), slog.String("err", err.Error()))
+		return 0, false
+	}
+	scroll := res.Pane.Scroll
+	if scroll == nil || scroll.ViewportRows <= 0 {
+		return 0, false
+	}
+	return scroll.ViewportRows + scroll.MaxOffsetFromBottom, true
+}
+
 // Prompt types text into the agent and submits it without waiting.
 func (g *Gateway) Prompt(ctx context.Context, target, text string) error {
 	return g.call(ctx, "agent.prompt", target, promptParams{Target: target, Text: text}, nil)

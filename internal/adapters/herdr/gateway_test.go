@@ -224,6 +224,76 @@ func TestGatewayReadScreen(t *testing.T) {
 	}
 }
 
+// paneGetHandler answers pane.get with the given scroll metrics, or none.
+func paneGetHandler(scroll map[string]any) testkit.HandlerFunc {
+	return func(id string, params json.RawMessage) (any, *testkit.APIError) {
+		pane := map[string]any{"pane_id": "w3:p2"}
+		if scroll != nil {
+			pane["scroll"] = scroll
+		}
+		return map[string]any{"type": "pane_info", "pane": pane}, nil
+	}
+}
+
+func emptyReadHandler(id string, params json.RawMessage) (any, *testkit.APIError) {
+	return map[string]any{"type": "pane_read", "read": map[string]any{"text": ""}}, nil
+}
+
+func TestGatewayReadLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scroll map[string]any
+		want   int
+		ok     bool
+	}{
+		{"fullscreen app keeps no scrollback", map[string]any{"offset_from_bottom": 0, "max_offset_from_bottom": 0, "viewport_rows": 57}, 57, true},
+		{"visible rows plus scrollback", map[string]any{"offset_from_bottom": 0, "max_offset_from_bottom": 12, "viewport_rows": 57}, 69, true},
+		{"no scroll metrics", nil, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testkit.NewNDJSONServer(t, nil)
+			s.Handle("pane.get", paneGetHandler(tc.scroll))
+			g := newGateway(t, s)
+			got, ok := g.ReadLimit(ctxT(t), "w3:p2")
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("ReadLimit = %d, %v; want %d, %v", got, ok, tc.want, tc.ok)
+			}
+			if params := lastParams(t, s, "pane.get"); params["pane_id"] != "w3:p2" {
+				t.Fatalf("pane.get params = %v", params)
+			}
+		})
+	}
+}
+
+func TestGatewayReadLimitUnavailableWhenPaneGetFails(t *testing.T) {
+	s := testkit.NewNDJSONServer(t, nil)
+	s.Handle("pane.get", func(id string, params json.RawMessage) (any, *testkit.APIError) {
+		return nil, &testkit.APIError{Code: "pane_not_found", Message: "no pane"}
+	})
+	g := newGateway(t, s)
+	if got, ok := g.ReadLimit(ctxT(t), "w3:p2"); ok {
+		t.Fatalf("ReadLimit = %d, true; want unavailable", got)
+	}
+}
+
+// ReadScreen reads as deep as asked: only the capture clamps, so /screen N
+// keeps its full depth.
+func TestGatewayReadScreenDoesNotClamp(t *testing.T) {
+	s := testkit.NewNDJSONServer(t, nil)
+	s.Handle("pane.get", paneGetHandler(map[string]any{"offset_from_bottom": 0, "max_offset_from_bottom": 0, "viewport_rows": 57}))
+	s.Handle("agent.read", emptyReadHandler)
+	g := newGateway(t, s)
+	if _, err := g.ReadScreen(ctxT(t), "w3:p2", domain.ScreenVisible, 200); err != nil {
+		t.Fatalf("ReadScreen: %v", err)
+	}
+	if got := lastParams(t, s, "agent.read"); got["lines"] != float64(200) {
+		t.Fatalf("lines = %v, want 200", got["lines"])
+	}
+	if reqs := s.WaitRequests("pane.get", 1, 50*time.Millisecond); len(reqs) != 0 {
+		t.Fatalf("ReadScreen asked pane.get %d times, want 0", len(reqs))
+	}
+}
+
 func TestGatewayReadScreenOmitsZeroLines(t *testing.T) {
 	s := testkit.NewNDJSONServer(t, nil)
 	s.Handle("agent.read", func(id string, params json.RawMessage) (any, *testkit.APIError) {

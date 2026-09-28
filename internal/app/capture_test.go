@@ -145,6 +145,23 @@ func TestCaptureTickReadsWorkingAgentsOnly(t *testing.T) {
 	}
 }
 
+func TestCaptureClampsReadsToPaneHistory(t *testing.T) {
+	f := newCaptureFixture(t)
+	f.agent("p1", domain.StatusWorking)
+	f.agent("p2", domain.StatusWorking)
+	f.herdr.SetReadLimit("p1", 57)   // fullscreen: one screen, no scrollback
+	f.herdr.SetReadLimit("p2", 5000) // scrollback deeper than the capture asks
+
+	f.capture.tick(f.ctx)
+	got := map[string]int{}
+	for _, r := range f.herdr.Reads() {
+		got[r.Target] = r.Lines
+	}
+	if want := map[string]int{"p1": 57, "p2": captureLines}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("read lines = %v, want %v", got, want)
+	}
+}
+
 func TestCaptureVisibleThenRecentWithOlderPrefixKeepsHistoryContinuous(t *testing.T) {
 	f := newCaptureFixture(t)
 	a := f.agent("p1", domain.StatusWorking)

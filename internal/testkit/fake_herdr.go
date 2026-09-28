@@ -67,6 +67,7 @@ type FakeHerdr struct {
 	prompts    []string
 	screens    map[string]string
 	revisions  map[string]int64
+	limits     map[string]int
 	reads      []ReadCall
 	keys       []KeysCall
 	focused    []string
@@ -100,6 +101,7 @@ func NewFakeHerdr(log *slog.Logger) *FakeHerdr {
 	return &FakeHerdr{
 		screens:   map[string]string{},
 		revisions: map[string]int64{},
+		limits:    map[string]int{},
 		failNext:  map[string]error{},
 		events:    make(chan domain.Event, 64),
 		log:       log,
@@ -302,6 +304,21 @@ func (f *FakeHerdr) ListAgents(context.Context) ([]domain.Agent, error) {
 		return nil, f.listErr
 	}
 	return append([]domain.Agent(nil), f.agents...), nil
+}
+
+// SetReadLimit scripts what ReadLimit answers for the target. Targets
+// without a script report no limit.
+func (f *FakeHerdr) SetReadLimit(target string, lines int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.limits[target] = lines
+}
+
+func (f *FakeHerdr) ReadLimit(_ context.Context, target string) (int, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	lines, ok := f.limits[target]
+	return lines, ok
 }
 
 func (f *FakeHerdr) ReadScreen(_ context.Context, target string, source domain.ScreenSource, lines int) (domain.Screen, error) {

@@ -182,7 +182,14 @@ func (c *Capture) capture(ctx context.Context, key domain.Key) {
 func (c *Capture) read(ctx context.Context, key domain.Key) (domain.Screen, domain.ScreenSource, error) {
 	rctx, cancel := context.WithTimeout(ctx, c.ReadTimeout)
 	defer cancel()
-	screen, err := c.herdr.ReadScreen(rctx, key.PaneID, domain.ScreenRecent, captureLines)
+	// The capture reads every second a working agent runs, so a read past
+	// what Herdr holds would scroll the pane under the user all the time.
+	// On-demand reads (/screen N) keep their full depth.
+	lines := captureLines
+	if limit, ok := c.herdr.ReadLimit(rctx, key.PaneID); ok && limit < lines {
+		lines = limit
+	}
+	screen, err := c.herdr.ReadScreen(rctx, key.PaneID, domain.ScreenRecent, lines)
 	if err == nil {
 		return screen, domain.ScreenRecent, nil
 	}
@@ -190,7 +197,7 @@ func (c *Capture) read(ctx context.Context, key domain.Key) (domain.Screen, doma
 		return domain.Screen{}, "", err
 	}
 
-	visible, visibleErr := c.herdr.ReadScreen(rctx, key.PaneID, domain.ScreenVisible, captureLines)
+	visible, visibleErr := c.herdr.ReadScreen(rctx, key.PaneID, domain.ScreenVisible, lines)
 	if visibleErr != nil {
 		return domain.Screen{}, "", fmt.Errorf("recent screen read failed: %w; visible fallback failed: %w", err, visibleErr)
 	}

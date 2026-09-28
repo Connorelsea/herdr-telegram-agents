@@ -51,7 +51,9 @@ const (
 	// captureReadTimeout bounds one agent.read made by the capture.
 	captureReadTimeout = 5 * time.Second
 	// captureLines is how many lines of recent output one capture read
-	// asks for; Claude Code panes return only the visible screen anyway.
+	// asks for at most. Capture clamps it to the pane's ReadLimit, so a
+	// fullscreen Claude Code pane is read one screen at a time instead of
+	// Herdr scrolling the app to reach 400.
 	captureLines = 400
 	// screenAllInlineRunes is the longest /screen all text still posted as
 	// messages (about three chunks); longer output goes out as a file.

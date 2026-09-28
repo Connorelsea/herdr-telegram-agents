@@ -39,6 +39,11 @@ type HerdrGateway interface {
 	ListAgents(ctx context.Context) ([]Agent, error)
 	// ReadScreen returns up to lines of terminal text for the agent.
 	ReadScreen(ctx context.Context, target string, source ScreenSource, lines int) (Screen, error)
+	// ReadLimit is how many lines Herdr can serve for the pane from what it
+	// holds (visible rows plus its own scrollback). A deeper ReadScreen
+	// makes Herdr scroll the application to recover older lines, which the
+	// user sees as the pane jumping. ok is false when Herdr reports no limit.
+	ReadLimit(ctx context.Context, target string) (lines int, ok bool)
 	// Prompt types text into the agent and submits it.
 	Prompt(ctx context.Context, target, text string) error
 	// SendKeys sends raw key names such as "enter" or "escape".
