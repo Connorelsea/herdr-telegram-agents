@@ -140,6 +140,7 @@ func TestOptionGroupsAndSpecs(t *testing.T) {
 		{OptionPostsPager, KindBool, "true", ""},
 		{OptionPostsBlockedDelay, KindChoice, "0", ChoiceSourceSeconds},
 		{OptionPostsMinSeconds, KindChoice, "0", ChoiceSourceSeconds},
+		{OptionPostsProgress, KindChoice, "live", ChoiceSourceProgress},
 	}
 	if len(posts) != len(wantPosts) {
 		t.Fatalf("posts options = %+v", posts)
@@ -729,5 +730,38 @@ func TestNoticeDelayOption(t *testing.T) {
 	clean, dropped := SanitizeOptions(dirty, nil)
 	if len(dropped) != 0 || clean.String(OptionNoticeDelay) != "45" {
 		t.Errorf("sanitize kept %q, dropped %v", clean.String(OptionNoticeDelay), dropped)
+	}
+}
+
+func TestPostsProgress(t *testing.T) {
+	opts := DefaultOptions()
+	if got := opts.PostsProgress(); got != ProgressLive {
+		t.Fatalf("default PostsProgress = %q", got)
+	}
+	for _, v := range ProgressChoices() {
+		set, err := opts.With(OptionPostsProgress, v)
+		if err != nil {
+			t.Fatalf("With(%q): %v", v, err)
+		}
+		if err := ValidateOptions(set, nil); err != nil {
+			t.Fatalf("ValidateOptions(%q): %v", v, err)
+		}
+		if got := set.PostsProgress(); string(got) != v {
+			t.Errorf("PostsProgress after %q = %q", v, got)
+		}
+	}
+	if bad, err := opts.With(OptionPostsProgress, "stream"); err == nil {
+		if err := ValidateOptions(bad, nil); err == nil {
+			t.Fatal("posts.progress = stream passed validation")
+		}
+	}
+	spec := OptionSpecs[indexOf(OptionPostsProgress)]
+	for value, want := range map[string]string{"off": "Off", "messages": "Messages", "live": "Live"} {
+		if got := ChoiceLabel(spec, value); got != want {
+			t.Errorf("ChoiceLabel(%q) = %q", value, got)
+		}
+		if got := ChoiceButton(spec, value); got != want {
+			t.Errorf("ChoiceButton(%q) = %q", value, got)
+		}
 	}
 }

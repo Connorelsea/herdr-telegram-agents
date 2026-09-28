@@ -456,6 +456,22 @@ func (f *FakeTelegram) EditText(_ context.Context, messageID int, text string, _
 	return nil
 }
 
+// EditMarkdown records "editmd:<message>:<text>" and replaces the text of
+// a known message; an unknown id handed out earlier is ErrMessageGone.
+func (f *FakeTelegram) EditMarkdown(_ context.Context, messageID int, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.record("editmd", fmt.Sprintf("editmd:%d:%s", messageID, text)); err != nil {
+		return err
+	}
+	if _, ok := f.texts[messageID]; !ok && messageID >= 1000 && messageID < f.nextMsgID {
+		return domain.ErrMessageGone
+	}
+	f.texts[messageID] = text
+	delete(f.buttons, messageID)
+	return nil
+}
+
 func (f *FakeTelegram) SetStatusIcons(icons domain.StatusIcons) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -571,6 +571,21 @@ func (g *Gateway) EditText(ctx context.Context, messageID int, text string, html
 		slog.Int("buttons", len(buttons)))
 }
 
+// EditMarkdown replaces the text of one of the bot's messages with rendered
+// Markdown, falling back to <pre> once when Telegram rejects the markup,
+// like Send does for a Markdown part. The keyboard is removed.
+func (g *Gateway) EditMarkdown(ctx context.Context, messageID int, text string) error {
+	if utf16Len(text) > textMax {
+		text = string([]rune(text)[:textMax-1]) + "…"
+	}
+	err := g.EditText(ctx, messageID, renderMarkdown(text), true, nil)
+	if err != nil && isMarkupError(err) {
+		g.log.Warn("markdown edit rejected, edited as pre", slog.Int("message_id", messageID), slog.Any("err", err))
+		err = g.EditText(ctx, messageID, renderCode(text), true, nil)
+	}
+	return err
+}
+
 // EditButtons replaces the inline keyboard of one of the bot's messages;
 // an empty slice removes it. Telegram answers "message is not modified"
 // when the keyboard already matches, which is the state the caller wants.

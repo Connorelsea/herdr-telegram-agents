@@ -82,6 +82,9 @@ func (o *Options) QuietPosts() domain.PostsMode { return o.Get().QuietPosts() }
 // PostsDone is what the topic receives when an agent turns done.
 func (o *Options) PostsDone() domain.DoneMode { return o.Get().PostsDone() }
 
+// PostsProgress is what the topic receives while an agent works.
+func (o *Options) PostsProgress() domain.ProgressMode { return o.Get().PostsProgress() }
+
 // PostsChrome reports whether Claude Code's input frame is cut from
 // screen posts.
 func (o *Options) PostsChrome() bool { return o.Get().PostsChrome() }

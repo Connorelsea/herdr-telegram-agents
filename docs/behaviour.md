@@ -293,6 +293,40 @@ screen for `/screen`; `/screen N` always reads the screen, and `/screen all`
 uses captured history (see [commands](commands.md)). None of these commands
 carries the summary line or the fold.
 
+## Progress posts
+
+A long turn (a task that runs for half an hour, or one that waits on
+background agents) is one turn to Herdr, so its done post comes only at
+the very end. `Progress` fills that gap for Claude Code agents: every 5 s
+the daemon reads what the agent's transcript gained and posts the new text
+the agent wrote, silently. Thinking, tool calls and subagent traffic are
+left out.
+
+- **The exact session only.** The transcript is found by the session id
+  Herdr's Claude Code integration reports for the pane
+  (`<session id>.jsonl`), never by guessing the newest file of the
+  directory, so two Claude panes in one directory never mix. A pane with
+  no reported session gets no progress posts and logs `progress
+  unavailable` once; `herdr integration install claude` fixes it.
+- **Only while working.** Text written while the agent is idle, or during
+  a turn too short to be seen, is skipped: the done post covers it. A
+  daemon that starts mid-turn follows from the end of the transcript and
+  posts nothing old.
+- **The last reply stays in the done post.** New text waits 8 s before it
+  is posted. The reply that ends a turn is written moments before the
+  agent stops, so it is still waiting when the turn ends, and with a
+  `Reply` or `Formatted` done post it is left out of progress instead of
+  showing twice. With a `Screen` done post, or `Skip short done posts` on,
+  it is posted as progress too.
+- **Live** keeps one message per turn headed `⏳ Working`, each text under
+  the local time it was written; when the turn ends the header becomes
+  `Progress`. A message that would pass Telegram's size limit is closed and
+  the next text starts a new one. A live message deleted in Telegram is
+  replaced by a new one on the next text.
+- **Messages** sends each batch of new text as its own silent message.
+- `Herdr → Telegram sync` off, a closed or muted topic, or `Progress` off
+  stop it; switching back on starts from the end of each transcript.
+
 ## Turns and reactions
 
 A **turn** is one exchange with an agent. It starts with the first
@@ -361,7 +395,7 @@ The options today:
 | `Hold topic edits` | Quiet | Default on. While at the desk no topic is created, renamed, closed, reopened or given a new icon; each of those is a Telegram service message that rings the phone. Off keeps topic edits live while at the desk. |
 | `Screen posts` | Quiet | Default `Silent`. What happens to blocked and done screens while at the desk: `Silent` posts without a sound (Telegram still shows a silent banner), `Held` posts nothing until you leave, `Normal` posts as usual. |
 | `Re-announce on leaving` | Quiet | Default on. When you leave, the screen of every agent still waiting for an answer is posted again with a sound, once per question. Off: only agents that have no post at all yet are posted. |
-| `Done post` | Posts | Default `Screen`. What a topic receives when its agent finishes: `Screen` posts the last 12 terminal lines in monospace; `Reply` posts the agent's last message from its Claude Code transcript (`~/.claude/projects/<cwd slug>/`, newest session file) in monospace; `Formatted` renders that message: headings and bold, `•` lists, links, inline and fenced code, tables in monospace. A reply longer than five messages is cut with `… (+N chars)`. For OpenCode the message comes from the CLI export for the pane's session. Falls back to `Screen` for other agents or when no reply is found, see [Done posts](#done-posts). |
+| `Done post` | Posts | Default `Screen`. What a topic receives when its agent finishes: `Screen` posts the last 12 terminal lines in monospace; `Reply` posts the agent's last message from its Claude Code transcript (`~/.claude/projects/<cwd slug>/`: the pane's own session file when Herdr's integration reports its session id, else the newest session file) in monospace; `Formatted` renders that message: headings and bold, `•` lists, links, inline and fenced code, tables in monospace. A reply longer than five messages is cut with `… (+N chars)`. For OpenCode the message comes from the CLI export for the pane's session. Falls back to `Screen` for other agents or when no reply is found, see [Done posts](#done-posts). |
 | `Turn summary line` | Posts | Default on. Every done post (`Screen`, `Reply` and `Formatted`) ends with one line from the agent's transcript: `⏱ 4 min · fable-5-1 · ✏️ 3 files · ↑ 12k tokens` (turn duration, model, distinct files edited, output tokens). Claude Code and OpenCode only; without a transcript the post ends as before and the log has `turn meta unavailable` at debug. A transcript written before the turn began is skipped. Off: no line and, in `Screen` mode, no transcript read. See [Done posts](#done-posts). |
 | `Fold long replies after` | Posts | Default `20 lines`. A `Reply` or `Formatted` done post whose message part has more lines than this arrives collapsed in Telegram's expandable quote: the first lines and an arrow that opens the rest; the summary line stays visible under it. `Off` never folds; `Screen` posts are never folded. Any integer of lines up to 1000 can be typed into `options.json`. See [Done posts](#done-posts). |
 | `Trim the input frame` | Posts | Default on. Every screen post (done and blocked screens, `/screen`, `/screen all`, the tails of the Claude Code commands, the pager's six lines) loses Claude Code's input frame at the bottom: the `─` rule, the empty `❯` row, the second rule, the status line (`… │ main ✓ │ 14%: …`) and the mode hint (`⏵⏵ auto mode on (shift+tab to cycle)` or `? for shortcuts`). The cut walks up from the bottom and stops at the first line that is none of these, so a dialog and its options are never touched, a `❯` row with typed text is left alone and a screen without the frame (Codex, any other agent) passes through unchanged. The duplicate check runs after the cut, so a screen that differs only in the status line's clock is not posted twice. Off posts the screen as captured. |
@@ -369,6 +403,7 @@ The options today:
 | `Questions in the bot's chat` | Posts | Default on. A question from an agent is posted into its topic without a sound and sent to you in the private chat with the bot with a sound: the agent's name, the dialog's options or the last six screen lines, and a link to the post. Mute the group in Telegram and only questions ring. Off: the topic post rings, nothing goes to the private chat. Needs a private chat the bot may write to; see [Silence the group](#silence-the-group). |
 | `Question delay` | Posts | Default `Off`. With `5s` … `120s`: after the usual 1.5 s capture the blocked post waits that long more, is dropped when the agent left blocked meanwhile, starts over when a newer question arrived, and otherwise posts the better of the two captures (more options recognised, then the longer text). `Off` posts the first capture at 1.5 s. Any integer of seconds up to 3600 can be typed into `options.json`. See [Questions and buttons](#questions-and-buttons). |
 | `Skip short done posts` | Posts | Default `Off`. With `5s` … `120s`: the done post of a turn shorter than that is skipped (blocked time included; a turn whose start the daemon never saw posts). Blocked posts and reactions are unaffected. Any integer of seconds up to 3600 can be typed into `options.json`. See [Turns and reactions](#turns-and-reactions). |
+| `Progress` | Posts | Default `Live`. What a topic receives while its agent is still working: the text a Claude Code agent writes to its transcript before the turn ends. `Live` keeps one message per turn and edits new text into it, `Messages` posts each batch of new text as its own silent message, `Off` waits for the done post. See [Progress posts](#progress-posts). |
 | `Accept files` | Inbox | Default on. Photos, documents, voice notes, audio and video sent to a topic are saved to the inbox and the agent is prompted with the path. Off: such messages answer `⚠️ inbox is off (/options → Inbox)`. See [Inbox](#inbox). |
 | `Largest file` | Inbox | Default 20 MB, the most Telegram lets a bot download. A larger file answers `⚠️ file too big: <size> > <max>` before any download. Any integer of megabytes from 1 to 20 can be typed into `options.json`. |
 | `Delete files after` | Inbox | Default 7 days. Inbox files older than that are deleted once a day, at daemon start and when the option changes. `Off` keeps them. Any integer of days can be typed into `options.json`. |

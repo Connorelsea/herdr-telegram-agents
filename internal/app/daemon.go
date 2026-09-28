@@ -39,6 +39,7 @@ type Daemon struct {
 	reconciler *Reconciler
 	bridge     *Bridge
 	capture    *Capture
+	progress   *Progress
 	dashboard  *Dashboard
 	configs    domain.ConfigStore
 	opts       *Options
@@ -347,6 +348,12 @@ func (d *Daemon) probePager(ctx context.Context, reason string) error {
 // inbox files (inbox.delete_after_days).
 func (d *Daemon) SetInbox(inbox domain.InboxStore) { d.inbox = inbox }
 
+// SetProgress enables progress posts from the agents' transcripts. The
+// posts go through the daemon's redacting gateway like every other post.
+func (d *Daemon) SetProgress(src domain.ProgressSource) {
+	d.progress = NewProgress(d.tg, src, d.registry.Live, d.reconciler.topics().Entry, d.opts, d.clock, d.log)
+}
+
 // SweepNow asks the loop for a stale-topic sweep. It never blocks.
 func (d *Daemon) SweepNow() {
 	select {
@@ -463,6 +470,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer wg.Done()
 		d.capture.Run(loopCtx)
 	}()
+	if d.progress != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.progress.Run(loopCtx)
+		}()
+	}
 	defer func() {
 		cancel()
 		wg.Wait()

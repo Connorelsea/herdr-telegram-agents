@@ -172,3 +172,22 @@ func TestSubscriptionOmitsEmptyPaneID(t *testing.T) {
 		t.Fatalf("got %s", b)
 	}
 }
+
+func TestToDomainAgentSessionID(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		session *agentSessionInfo
+		want    string
+	}{
+		{"id session", &agentSessionInfo{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: " ef5f7515 "}, "ef5f7515"},
+		{"path session", &agentSessionInfo{Source: "codex", Agent: "codex", Kind: "path", Value: "/private/session/abc"}, ""},
+		{"no session", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := toDomainAgent(agentInfo{PaneID: "p1", TerminalID: "t1", Agent: "claude", AgentSession: tc.session})
+			if got.SessionID != tc.want {
+				t.Fatalf("SessionID = %q, want %q", got.SessionID, tc.want)
+			}
+		})
+	}
+}

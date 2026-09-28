@@ -126,6 +126,11 @@ const (
 	// OptionPostsMinSeconds skips the done post of a turn shorter than
 	// this many seconds; "0" posts every done screen.
 	OptionPostsMinSeconds = "posts.min_seconds"
+	// OptionPostsProgress says what a topic receives while its agent is
+	// still working: a ProgressMode value.
+	OptionPostsProgress = "posts.progress"
+	// ChoiceSourceProgress is the static list of ProgressMode values.
+	ChoiceSourceProgress = "progress"
 	// ChoiceSourceSeconds is the static list of second counts offered by
 	// the panel for the two delay options (see SecondsChoices).
 	ChoiceSourceSeconds = "seconds"
@@ -162,6 +167,19 @@ const (
 	DoneReply DoneMode = "reply"
 	// DoneFormatted posts the agent's last reply rendered from Markdown.
 	DoneFormatted DoneMode = "formatted"
+)
+
+// ProgressMode is what the topic receives while its agent is working: the
+// text the agent writes to its transcript before the turn ends.
+type ProgressMode string
+
+const (
+	// ProgressOff posts nothing until the turn ends.
+	ProgressOff ProgressMode = "off"
+	// ProgressMessages posts each batch of new text as its own message.
+	ProgressMessages ProgressMode = "messages"
+	// ProgressLive keeps one message per turn and edits new text into it.
+	ProgressLive ProgressMode = "live"
 )
 
 // PostsMode is what quiet mode does with screen posts while the operator
@@ -331,6 +349,15 @@ func buildOptionSpecs() []OptionSpec {
 			Validate:    validateSeconds,
 		},
 		{
+			Key:         OptionPostsProgress,
+			Group:       GroupPosts,
+			Title:       "Progress",
+			Description: "What is posted while an agent is still working: the text it writes before the turn ends. Live keeps one message per turn and edits new text into it, Messages posts new text as its own messages, Off waits for the done post. Claude Code only.",
+			Kind:        KindChoice,
+			Default:     string(ProgressLive),
+			Choices:     ChoiceSourceProgress,
+		},
+		{
 			Key:         OptionInboxEnabled,
 			Group:       GroupInbox,
 			Title:       "Accept files",
@@ -447,6 +474,12 @@ var doneChoices = []string{string(DoneScreen), string(DoneReply), string(DoneFor
 // DoneChoices returns the DoneMode values the panel offers.
 func DoneChoices() []string { return append([]string(nil), doneChoices...) }
 
+// progressChoices is the list the panel offers for OptionPostsProgress.
+var progressChoices = []string{string(ProgressOff), string(ProgressMessages), string(ProgressLive)}
+
+// ProgressChoices returns the ProgressMode values the panel offers.
+func ProgressChoices() []string { return append([]string(nil), progressChoices...) }
+
 // secondsChoices is the list the panel offers for OptionPostsBlockedDelay
 // and OptionPostsMinSeconds.
 var secondsChoices = []string{"0", "5", "10", "30", "60", "120"}
@@ -505,6 +538,8 @@ func StaticChoices(name string) ([]string, bool) {
 		return PostsChoices(), true
 	case ChoiceSourceDone:
 		return DoneChoices(), true
+	case ChoiceSourceProgress:
+		return ProgressChoices(), true
 	case ChoiceSourceSeconds:
 		return SecondsChoices(), true
 	case ChoiceSourceNotice:
@@ -620,6 +655,8 @@ func ChoiceLabel(spec OptionSpec, value string) string {
 		return postsWord(value)
 	case ChoiceSourceDone:
 		return doneWord(value)
+	case ChoiceSourceProgress:
+		return progressWord(value)
 	}
 	return value
 }
@@ -685,6 +722,8 @@ func ChoiceButton(spec OptionSpec, value string) string {
 		return postsWord(value)
 	case ChoiceSourceDone:
 		return doneWord(value)
+	case ChoiceSourceProgress:
+		return progressWord(value)
 	}
 	return value
 }
@@ -713,6 +752,20 @@ func doneWord(value string) string {
 		return "Reply"
 	case DoneFormatted:
 		return "Formatted"
+	}
+	return value
+}
+
+// progressWord capitalises a known ProgressMode value ("live" → "Live")
+// and returns anything else as is.
+func progressWord(value string) string {
+	switch ProgressMode(strings.TrimSpace(value)) {
+	case ProgressOff:
+		return "Off"
+	case ProgressMessages:
+		return "Messages"
+	case ProgressLive:
+		return "Live"
 	}
 	return value
 }
@@ -903,6 +956,16 @@ func (o Options) QuietPosts() PostsMode {
 		return m
 	}
 	return PostsSilent
+}
+
+// PostsProgress is what the topic receives while an agent works;
+// ProgressOff for an unknown value.
+func (o Options) PostsProgress() ProgressMode {
+	switch m := ProgressMode(strings.TrimSpace(o.String(OptionPostsProgress))); m {
+	case ProgressOff, ProgressMessages, ProgressLive:
+		return m
+	}
+	return ProgressOff
 }
 
 // PostsDone is what the topic receives when an agent turns done;

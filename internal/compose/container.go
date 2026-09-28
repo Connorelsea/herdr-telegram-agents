@@ -323,9 +323,10 @@ func BuildDaemon(ctx context.Context, env PluginEnv, cfg domain.Config, log *slo
 	reconciler := app.NewReconciler(tg, hg, mappings, mapping, opts, clock, log)
 	capture := app.NewCapture(hg, registry.Live, clock, log)
 	inbox := state.NewInbox(env.StateDir, log)
+	replies := transcript.NewReader(log)
 	bridge := app.NewBridge(cfg, hg, tg, registry, reconciler, capture, opts,
 		app.Services{Replies: domain.MultiReplySource{
-			transcript.NewReader(log),
+			replies,
 			transcript.NewOpenCodeReader(hg.AgentSession, system.NewOpenCodeExporter(log).Export, log),
 		}, Git: system.NewGitRunner(log), Inbox: inbox, Config: state.NewConfigStore(env.ConfigDir, log),
 			Updates: BuildUpdateManager(env, log), UpdateJobs: state.NewUpdateStore(env.StateDir, log),
@@ -339,5 +340,6 @@ func BuildDaemon(ctx context.Context, env PluginEnv, cfg domain.Config, log *slo
 	presence := app.NewPresence(system.NewIdleSource(log), opts, clock, log)
 	d = app.NewDaemon(cfg, hg, tg, registry, reconciler, bridge, capture, state.NewConfigStore(env.ConfigDir, log), opts, presence, clock, log)
 	d.SetInbox(inbox)
+	d.SetProgress(replies)
 	return d, run, closeAll, nil
 }

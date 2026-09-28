@@ -295,6 +295,10 @@ func toDomainAgent(a agentInfo) domain.Agent {
 		name = strings.TrimSpace(*a.Name)
 	}
 	key := domain.Key{PaneID: a.PaneID, TerminalID: a.TerminalID}
+	sessionID := ""
+	if a.AgentSession != nil && a.AgentSession.Kind == "id" {
+		sessionID = strings.TrimSpace(a.AgentSession.Value)
+	}
 	if a.AgentSession != nil {
 		key.SessionDigest = (domain.SessionTuple{
 			Source: a.AgentSession.Source,
@@ -315,6 +319,7 @@ func toDomainAgent(a agentInfo) domain.Agent {
 		StateChangeSeq: a.StateChangeSeq,
 		Focused:        a.Focused,
 		Cwd:            a.Cwd,
+		SessionID:      sessionID,
 	}
 }
 

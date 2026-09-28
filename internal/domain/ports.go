@@ -118,6 +118,28 @@ type ReplySource interface {
 	LastReply(ctx context.Context, agent Agent) (Reply, error)
 }
 
+// ProgressText is one text part the agent wrote to its transcript while
+// working, in file order. Written is the record's timestamp.
+type ProgressText struct {
+	Text    string
+	Written time.Time
+}
+
+// ProgressSource follows an agent's own session transcript while it works.
+// It only answers for an agent whose exact session is known
+// (Agent.SessionID); a guess between the sessions of one directory could
+// post another pane's work into the topic.
+type ProgressSource interface {
+	// ProgressTranscript returns the path of the agent's transcript and
+	// its current size. ErrNoReply, wrapped with the reason, means the
+	// agent has no transcript this source can follow.
+	ProgressTranscript(ctx context.Context, agent Agent) (path string, size int64, err error)
+	// ProgressSince returns the assistant text parts of the main
+	// conversation written after offset, and the offset just past the last
+	// complete line read, where the next call starts.
+	ProgressSince(ctx context.Context, path string, offset int64) ([]ProgressText, int64, error)
+}
+
 // Button is one inline button under a bot message. Text is what the
 // operator sees; Data comes back verbatim in ButtonPressed and must stay
 // within Telegram's 64-byte limit. Buttons with the same non-zero Row share
@@ -221,6 +243,11 @@ type TelegramGateway interface {
 	// in one call; an empty buttons slice removes the keyboard. Editing to
 	// the same content is a success.
 	EditText(ctx context.Context, messageID int, text string, html bool, buttons []Button) error
+	// EditMarkdown replaces the text of a bot message with Markdown
+	// rendered the way Send renders Outgoing.Markdown; a text Telegram
+	// rejects as markup is edited in once more as a code block. The text
+	// must fit one message; a longer one is cut.
+	EditMarkdown(ctx context.Context, messageID int, text string) error
 	// SetStatusIcons replaces the emoji used for topic icons from now on;
 	// safe to call from any goroutine. The default table is in force until
 	// the first call.

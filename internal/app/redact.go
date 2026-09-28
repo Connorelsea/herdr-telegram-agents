@@ -83,6 +83,16 @@ func (g *redactingGateway) EditText(ctx context.Context, messageID int, text str
 	return g.TelegramGateway.EditText(ctx, messageID, text, html, buttons)
 }
 
+func (g *redactingGateway) EditMarkdown(ctx context.Context, messageID int, text string) error {
+	if !g.enabled() {
+		return g.TelegramGateway.EditMarkdown(ctx, messageID, text)
+	}
+	stats := domain.RedactionStats{}
+	text = g.redact(text, stats)
+	g.report(0, "editmarkdown", stats)
+	return g.TelegramGateway.EditMarkdown(ctx, messageID, text)
+}
+
 func (g *redactingGateway) EditButtons(ctx context.Context, messageID int, buttons []domain.Button) error {
 	if !g.enabled() {
 		return g.TelegramGateway.EditButtons(ctx, messageID, buttons)
