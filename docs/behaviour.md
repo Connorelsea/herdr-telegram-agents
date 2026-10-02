@@ -324,8 +324,35 @@ left out.
   the next text starts a new one. A live message deleted in Telegram is
   replaced by a new one on the next text.
 - **Messages** sends each batch of new text as its own silent message.
-- `Herdr → Telegram sync` off, a closed or muted topic, or `Progress` off
-  stop it; switching back on starts from the end of each transcript.
+- `Herdr → Telegram sync` off, a closed or muted topic, or `Progress` and
+  `Images` both off stop it; switching back on starts from the end of
+  each transcript.
+
+### Images
+
+With `Images` on, an image a tool returns to a Claude Code agent (a
+screenshot it opens with Read, a browser screenshot from an MCP tool) is
+posted into its topic as a silent photo captioned with its name and the
+local time it was read, for example `🖼 landing-desktop.png · 15:04`.
+
+- **What the agent saw.** The bytes come from the transcript, not the
+  file on disk, so a screenshot overwritten since still shows the version
+  the agent looked at. Images attached to a prompt and images inside
+  subagents are not posted.
+- **In order.** An image waits the same 8 s as text and is posted between
+  the texts written before and after it: in `Live` mode the live message
+  is closed above the image and the next text starts a new one below it.
+  An image read while the agent is idle, during a turn too short to be
+  seen, or with `Progress` off is posted at once. The done post never
+  carries images, so an image at the end of a turn is posted too.
+- **Photo or file.** An image goes as a compressed photo when it suits
+  one. A full-page screenshot that Telegram would shrink past readability,
+  one outside Telegram's photo limits (10 MB, width plus height up to
+  10000, a side ratio up to 20), one Go cannot decode (WebP) and one
+  Telegram rejects as a photo are sent as the image file instead.
+- **Not redacted.** `Redact secrets` masks the caption and the file name
+  but cannot mask an image: it is sent as the agent saw it. That is why
+  `Images` is off by default.
 
 ## Turns and reactions
 
@@ -404,6 +431,7 @@ The options today:
 | `Question delay` | Posts | Default `Off`. With `5s` … `120s`: after the usual 1.5 s capture the blocked post waits that long more, is dropped when the agent left blocked meanwhile, starts over when a newer question arrived, and otherwise posts the better of the two captures (more options recognised, then the longer text). `Off` posts the first capture at 1.5 s. Any integer of seconds up to 3600 can be typed into `options.json`. See [Questions and buttons](#questions-and-buttons). |
 | `Skip short done posts` | Posts | Default `Off`. With `5s` … `120s`: the done post of a turn shorter than that is skipped (blocked time included; a turn whose start the daemon never saw posts). Blocked posts and reactions are unaffected. Any integer of seconds up to 3600 can be typed into `options.json`. See [Turns and reactions](#turns-and-reactions). |
 | `Progress` | Posts | Default `Live`. What a topic receives while its agent is still working: the text a Claude Code agent writes to its transcript before the turn ends. `Live` keeps one message per turn and edits new text into it, `Messages` posts each batch of new text as its own silent message, `Off` waits for the done post. See [Progress posts](#progress-posts). |
+| `Images` | Posts | Default off. On: an image a Claude Code agent's tool returns to it (a screenshot it reads) is posted into its topic as a silent photo, in order with the progress text, also when `Progress` is off. `Redact secrets` cannot mask an image. See [Images](#images). |
 | `Accept files` | Inbox | Default on. Photos, documents, voice notes, audio and video sent to a topic are saved to the inbox and the agent is prompted with the path. Off: such messages answer `⚠️ inbox is off (/options → Inbox)`. See [Inbox](#inbox). |
 | `Largest file` | Inbox | Default 20 MB, the most Telegram lets a bot download. A larger file answers `⚠️ file too big: <size> > <max>` before any download. Any integer of megabytes from 1 to 20 can be typed into `options.json`. |
 | `Delete files after` | Inbox | Default 7 days. Inbox files older than that are deleted once a day, at daemon start and when the option changes. `Off` keeps them. Any integer of days can be typed into `options.json`. |

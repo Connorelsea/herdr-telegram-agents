@@ -129,6 +129,9 @@ const (
 	// OptionPostsProgress says what a topic receives while its agent is
 	// still working: a ProgressMode value.
 	OptionPostsProgress = "posts.progress"
+	// OptionPostsImages posts the images a Claude Code agent's tools
+	// return to it (a screenshot it read) into its topic.
+	OptionPostsImages = "posts.images"
 	// ChoiceSourceProgress is the static list of ProgressMode values.
 	ChoiceSourceProgress = "progress"
 	// ChoiceSourceSeconds is the static list of second counts offered by
@@ -356,6 +359,14 @@ func buildOptionSpecs() []OptionSpec {
 			Kind:        KindChoice,
 			Default:     string(ProgressLive),
 			Choices:     ChoiceSourceProgress,
+		},
+		{
+			Key:         OptionPostsImages,
+			Group:       GroupPosts,
+			Title:       "Images",
+			Description: "Post the images an agent looks at while it works, such as a screenshot it reads, into its topic as it reads them. Redact secrets cannot mask an image: it is sent as the agent saw it. Off (default): no images. Claude Code only.",
+			Kind:        KindBool,
+			Default:     "false",
 		},
 		{
 			Key:         OptionInboxEnabled,
@@ -967,6 +978,10 @@ func (o Options) PostsProgress() ProgressMode {
 	}
 	return ProgressOff
 }
+
+// PostsImages reports whether the images an agent's tools return to it
+// are posted into its topic.
+func (o Options) PostsImages() bool { return o.Bool(OptionPostsImages) }
 
 // PostsDone is what the topic receives when an agent turns done;
 // DoneScreen for an unknown value.

@@ -59,6 +59,7 @@ type FakeTelegram struct {
 	observers []int64
 	pack      []string
 	docs      []domain.Document
+	photos    []domain.Document
 	files     map[string][]byte
 	// downloadDelay makes Download sleep that long (real time) so tests
 	// can see that a download does not stall the bridge loop.
@@ -197,8 +198,15 @@ func (f *FakeTelegram) Documents() []domain.Document {
 	return append([]domain.Document(nil), f.docs...)
 }
 
-// Reset forgets the recorded calls, sent messages, direct messages and
-// documents but keeps the topics.
+// Photos returns every image accepted by SendPhoto, in order.
+func (f *FakeTelegram) Photos() []domain.Document {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Document(nil), f.photos...)
+}
+
+// Reset forgets the recorded calls, sent messages, direct messages,
+// documents and photos but keeps the topics.
 func (f *FakeTelegram) Reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -206,6 +214,7 @@ func (f *FakeTelegram) Reset() {
 	f.sent = nil
 	f.direct = nil
 	f.docs = nil
+	f.photos = nil
 }
 
 // Topics returns a copy of the topics sorted by thread id.
@@ -546,6 +555,21 @@ func (f *FakeTelegram) SendDocument(_ context.Context, doc domain.Document) erro
 		}
 	}
 	f.docs = append(f.docs, doc)
+	return nil
+}
+
+func (f *FakeTelegram) SendPhoto(_ context.Context, photo domain.Document) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.record("photo", fmt.Sprintf("photo:%d:%s:%d", photo.ThreadID, photo.Name, len(photo.Data))); err != nil {
+		return err
+	}
+	if photo.ThreadID != 0 {
+		if _, ok := f.topics[photo.ThreadID]; !ok {
+			return domain.ErrTopicGone
+		}
+	}
+	f.photos = append(f.photos, photo)
 	return nil
 }
 

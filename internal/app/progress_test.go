@@ -27,6 +27,12 @@ func (s *fakeProgressSource) add(text string, written time.Time) {
 	s.texts = append(s.texts, domain.ProgressText{Text: text, Written: written})
 }
 
+func (s *fakeProgressSource) addImage(name string, written time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.texts = append(s.texts, domain.ProgressText{Image: &domain.ProgressImage{Name: name, MediaType: "image/png", Data: []byte("png:" + name)}, Written: written})
+}
+
 func (s *fakeProgressSource) ProgressTranscript(_ context.Context, a domain.Agent) (string, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -96,11 +102,14 @@ func (f *progressFixture) step(d time.Duration) {
 // write adds a transcript text written now.
 func (f *progressFixture) write(text string) { f.src.add(text, f.clock.Now()) }
 
+// read adds an image the agent read now.
+func (f *progressFixture) read(name string) { f.src.addImage(name, f.clock.Now()) }
+
 // calls are the fake's send and editmd calls, in order.
 func (f *progressFixture) calls() []string {
 	var out []string
 	for _, c := range f.tg.Calls() {
-		if strings.HasPrefix(c, "send:") || strings.HasPrefix(c, "editmd:") {
+		if strings.HasPrefix(c, "send:") || strings.HasPrefix(c, "editmd:") || strings.HasPrefix(c, "photo:") {
 			out = append(out, c)
 		}
 	}
@@ -255,5 +264,122 @@ func TestProgressForgetsADeletedLiveMessage(t *testing.T) {
 	sent := f.tg.Sent()
 	if len(sent) != 2 || !strings.HasSuffix(sent[1].Text, "Three.") {
 		t.Fatalf("after delete = %+v", sent)
+	}
+}
+
+// kinds sums up calls as send/editmd/photo:<name>, in order.
+func kinds(calls []string) []string {
+	out := make([]string, 0, len(calls))
+	for _, c := range calls {
+		switch {
+		case strings.HasPrefix(c, "photo:"):
+			parts := strings.SplitN(c, ":", 4)
+			out = append(out, "photo:"+parts[2])
+		case strings.HasPrefix(c, "editmd:") && strings.Contains(c, "**Progress**"):
+			out = append(out, "close")
+		case strings.HasPrefix(c, "editmd:"):
+			out = append(out, "edit")
+		default:
+			out = append(out, "send")
+		}
+	}
+	return out
+}
+
+func TestProgressImagesAreOffByDefault(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsDone, "formatted")
+	f.step(0)
+	f.write("Let's look at the screenshot.")
+	f.read("landing-desktop.png")
+	f.step(10 * time.Second)
+	if photos := f.tg.Photos(); len(photos) != 0 {
+		t.Fatalf("photos = %+v", photos)
+	}
+	if sent := f.tg.Sent(); len(sent) != 1 {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
+func TestProgressLivePostsImagesBetweenTheirTexts(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsImages, "true", domain.OptionPostsDone, "formatted")
+	f.step(0)
+	f.write("Let's look at the screenshot.")
+	f.read("landing-desktop.png")
+	f.step(5 * time.Second)
+	if got := f.calls(); len(got) != 0 {
+		t.Fatalf("held items posted early: %q", got)
+	}
+	f.step(5 * time.Second)
+	f.write("The header is cut off.")
+	f.step(10 * time.Second)
+	if got := strings.Join(kinds(f.calls()), " "); got != "send close photo:landing-desktop.png send" {
+		t.Fatalf("calls = %q", got)
+	}
+	photo := f.tg.Photos()[0]
+	if photo.ThreadID != f.threadID || string(photo.Data) != "png:landing-desktop.png" ||
+		photo.Caption != "🖼 landing-desktop.png · "+tb0.Local().Format("15:04") {
+		t.Fatalf("photo = %+v", photo)
+	}
+}
+
+func TestProgressKeepsImagesAfterTheReplyAtTurnEnd(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsImages, "true", domain.OptionPostsDone, "formatted")
+	f.step(0)
+	f.write("Done, here is the page.") // the reply the done post carries
+	f.read("final.png")
+	f.agent.Status = domain.StatusIdle
+	f.step(time.Second)
+	f.step(6 * time.Second)
+	if got := strings.Join(kinds(f.calls()), " "); got != "photo:final.png" {
+		t.Fatalf("calls = %q", got)
+	}
+}
+
+func TestProgressPostsImagesReadOutsideATurn(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsImages, "true", domain.OptionPostsDone, "formatted")
+	f.agent.Status = domain.StatusIdle
+	f.step(0)
+	f.write("A turn too short to be seen.")
+	f.read("quick.png")
+	f.step(5 * time.Second)
+	if got := strings.Join(kinds(f.calls()), " "); got != "photo:quick.png" {
+		t.Fatalf("calls = %q", got)
+	}
+}
+
+func TestProgressOffStillPostsImages(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsProgress, "off", domain.OptionPostsImages, "true")
+	f.step(0)
+	f.write("Not posted: progress is off.")
+	f.read("a.png")
+	f.step(time.Second) // no hold: progress text is not there to keep order with
+	if got := strings.Join(kinds(f.calls()), " "); got != "photo:a.png" {
+		t.Fatalf("calls = %q", got)
+	}
+}
+
+func TestProgressMessagesModeSplitsTextAroundImages(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsProgress, "messages", domain.OptionPostsImages, "true", domain.OptionPostsDone, "formatted")
+	f.step(0)
+	f.write("One.")
+	f.read("a.png")
+	f.write("Two.")
+	f.write("Three.")
+	f.step(10 * time.Second)
+	if got := strings.Join(kinds(f.calls()), " "); got != "send photo:a.png send" {
+		t.Fatalf("calls = %q", got)
+	}
+	if sent := f.tg.Sent(); len(sent) != 2 || !strings.HasSuffix(sent[0].Text, "One.") || !strings.Contains(sent[1].Text, "Two.") || !strings.HasSuffix(sent[1].Text, "Three.") {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
+func TestProgressStopsFollowingWithProgressAndImagesOff(t *testing.T) {
+	f := newProgressFixture(t, domain.OptionPostsProgress, "off")
+	f.step(0)
+	f.read("a.png")
+	f.step(10 * time.Second)
+	if f.src.reads != 0 || len(f.tg.Photos()) != 0 {
+		t.Fatalf("reads = %d, photos = %d", f.src.reads, len(f.tg.Photos()))
 	}
 }

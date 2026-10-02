@@ -42,6 +42,16 @@ func TestRedactingGatewayMasksEverythingThatLeaves(t *testing.T) {
 		t.Fatalf("Documents = %+v", docs)
 	}
 
+	// An image is never run through the text redactor: only its caption
+	// and name are masked.
+	shot := []byte("\x89PNG " + testKey)
+	if err := tg.SendPhoto(ctx, domain.Document{ThreadID: 0, Name: testBotToken + ".png", Data: shot, Caption: "🖼 " + testKey}); err != nil {
+		t.Fatal(err)
+	}
+	if photos := fake.Photos(); len(photos) != 1 || string(photos[0].Data) != string(shot) || photos[0].Caption != "🖼 sk-…uvwx" || photos[0].Name != "[redacted].png" {
+		t.Fatalf("Photos = %+v", photos)
+	}
+
 	if err := tg.EditText(ctx, id, "edited "+testKey, false, []domain.Button{{Text: "Bearer 0123456789abcdefghij", Data: "x"}}); err != nil {
 		t.Fatal(err)
 	}

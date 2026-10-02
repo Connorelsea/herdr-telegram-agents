@@ -36,7 +36,8 @@ const (
 
 // Progress posts the text a Claude Code agent writes to its transcript
 // while it works, so a long turn shows up in its topic before the done
-// post. It follows each agent's exact session transcript from a byte
+// post, and, with posts.images on, the images its tools return to it (a
+// screenshot it read) as photos. It follows each agent's exact session transcript from a byte
 // offset: text written while the agent is idle, or during a turn too short
 // to be seen, is skipped, because the done post covers it. In Live mode one
 // message per turn is edited as text arrives; in Messages mode each batch
@@ -116,12 +117,13 @@ func (p *Progress) Run(ctx context.Context) {
 	}
 }
 
-// tick handles every live agent once. With progress off or sync paused
-// nothing is followed and the state is dropped, so switching back on
-// starts from the end of each transcript instead of posting a backlog.
+// tick handles every live agent once. With progress and images off, or
+// sync paused, nothing is followed and the state is dropped, so switching
+// back on starts from the end of each transcript instead of posting a
+// backlog.
 func (p *Progress) tick(ctx context.Context) {
 	mode := p.opts.PostsProgress()
-	if mode == domain.ProgressOff || !p.opts.SyncEnabled() {
+	if (mode == domain.ProgressOff && !p.opts.PostsImages()) || !p.opts.SyncEnabled() {
 		if len(p.states) > 0 {
 			p.log.Debug("progress idle, state dropped", slog.String("mode", string(mode)), slog.Int("agents", len(p.states)))
 			p.states = map[domain.Key]*progressState{}
@@ -167,6 +169,7 @@ func (p *Progress) agent(ctx context.Context, a domain.Agent, mode domain.Progre
 		return err
 	}
 	st.offset = offset
+	texts = p.wanted(texts, mode)
 
 	entry, ok := p.topics(a.Key)
 	postable := ok && entry.ThreadID != 0 && !entry.Closed && !entry.Muted
@@ -175,6 +178,9 @@ func (p *Progress) agent(ctx context.Context, a domain.Agent, mode domain.Progre
 	case !postable:
 		p.reset(st)
 		return nil
+	case mode == domain.ProgressOff:
+		// Only images are followed: they go out as they are read.
+		return p.postImages(ctx, a.Key, entry.ThreadID, texts)
 	case active:
 		if !st.inTurn {
 			p.reset(st)
@@ -193,15 +199,71 @@ func (p *Progress) agent(ctx context.Context, a domain.Agent, mode domain.Progre
 		// carries; everything held before it goes out now.
 		due := st.held
 		st.held = nil
-		if len(due) > 0 && p.doneCarriesReply() {
-			due = due[:len(due)-1]
+		if p.doneCarriesReply() {
+			due = withoutLastText(due)
 		}
 		err := p.post(ctx, a.Key, entry.ThreadID, st, mode, due, true)
 		p.log.Debug("progress turn ended", slog.String("key", a.Key.String()), slog.Int("posted", st.posted))
 		p.reset(st)
 		return err
 	}
-	return nil // idle outside a turn: the text belongs to the done post
+	// Idle outside a turn: the text belongs to the done post, but the done
+	// post carries no images.
+	return p.postImages(ctx, a.Key, entry.ThreadID, texts)
+}
+
+// wanted drops what the options do not post: images with posts.images
+// off, text with progress off.
+func (p *Progress) wanted(texts []domain.ProgressText, mode domain.ProgressMode) []domain.ProgressText {
+	images := p.opts.PostsImages()
+	out := texts[:0:0]
+	for _, t := range texts {
+		if (t.Image != nil && images) || (t.Image == nil && mode != domain.ProgressOff) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// withoutLastText removes the newest text, the reply the done post
+// carries; images after it stay.
+func withoutLastText(held []heldText) []heldText {
+	for i := len(held) - 1; i >= 0; i-- {
+		if held[i].Image == nil {
+			return append(held[:i:i], held[i+1:]...)
+		}
+	}
+	return held
+}
+
+// postImages sends the images among texts at once, skipping the text.
+func (p *Progress) postImages(ctx context.Context, key domain.Key, threadID int, texts []domain.ProgressText) error {
+	for _, t := range texts {
+		if t.Image == nil {
+			continue
+		}
+		if err := p.sendImage(ctx, key, threadID, heldText{ProgressText: t, seen: p.clock.Now()}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sendImage posts one image as a silent photo captioned with its name and
+// the local time the agent read it.
+func (p *Progress) sendImage(ctx context.Context, key domain.Key, threadID int, h heldText) error {
+	img := h.Image
+	written := h.Written
+	if written.IsZero() {
+		written = h.seen
+	}
+	caption := "🖼 " + img.Name + " · " + written.Local().Format("15:04")
+	if err := p.tg.SendPhoto(ctx, domain.Document{ThreadID: threadID, Name: img.Name, Data: img.Data, Caption: caption}); err != nil {
+		return fmt.Errorf("send progress image: %w", err)
+	}
+	p.log.Info("progress image posted", slog.String("key", key.String()),
+		slog.String("media_type", img.MediaType), slog.Int("bytes", len(img.Data)))
+	return nil
 }
 
 // follow starts following the agent's transcript. A session first seen
@@ -279,18 +341,50 @@ func (p *Progress) post(ctx context.Context, key domain.Key, threadID int, st *p
 		if len(due) == 0 {
 			return nil
 		}
-		parts := make([]string, 0, len(due))
+		// Text between two images is one message, so each image lands
+		// after the text written before it.
+		var parts []string
+		flush := func() error {
+			if len(parts) == 0 {
+				return nil
+			}
+			if _, err := p.tg.Send(ctx, domain.Outgoing{ThreadID: threadID, Text: strings.Join(parts, "\n\n"), Markdown: true, MaxParts: replyMaxParts}); err != nil {
+				return fmt.Errorf("send progress: %w", err)
+			}
+			st.posted += len(parts)
+			p.log.Info("progress posted", slog.String("key", key.String()), slog.String("mode", string(mode)), slog.Int("texts", len(parts)))
+			parts = nil
+			return nil
+		}
 		for _, h := range due {
-			parts = append(parts, progressEntry(h))
+			if h.Image == nil {
+				parts = append(parts, progressEntry(h))
+				continue
+			}
+			if err := flush(); err != nil {
+				return err
+			}
+			if err := p.sendImage(ctx, key, threadID, h); err != nil {
+				return err
+			}
+			st.posted++
 		}
-		if _, err := p.tg.Send(ctx, domain.Outgoing{ThreadID: threadID, Text: strings.Join(parts, "\n\n"), Markdown: true, MaxParts: replyMaxParts}); err != nil {
-			return fmt.Errorf("send progress: %w", err)
-		}
-		st.posted += len(due)
-		p.log.Info("progress posted", slog.String("key", key.String()), slog.String("mode", string(mode)), slog.Int("texts", len(due)))
-		return nil
+		return flush()
 	}
 	for _, h := range due {
+		if h.Image != nil {
+			// The live message so far is closed above the image; text
+			// after the image starts a new one below it.
+			if err := p.edit(ctx, st, true); err != nil {
+				return err
+			}
+			st.msgID, st.entries, st.shown = 0, nil, ""
+			if err := p.sendImage(ctx, key, threadID, h); err != nil {
+				return err
+			}
+			st.posted++
+			continue
+		}
 		entry := progressEntry(h)
 		if st.msgID != 0 && utf8.RuneCountInString(liveText(append(st.entries, entry), false)) > progressBudget {
 			// The message is full: close it and start the next one.

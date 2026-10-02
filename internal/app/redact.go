@@ -72,6 +72,20 @@ func (g *redactingGateway) SendDocument(ctx context.Context, doc domain.Document
 	return g.TelegramGateway.SendDocument(ctx, doc)
 }
 
+// SendPhoto masks the caption and the file name only: an image cannot be
+// redacted, and running the text redactor over its bytes would corrupt
+// it. Images are posted only when the operator turned posts.images on.
+func (g *redactingGateway) SendPhoto(ctx context.Context, photo domain.Document) error {
+	if !g.enabled() {
+		return g.TelegramGateway.SendPhoto(ctx, photo)
+	}
+	stats := domain.RedactionStats{}
+	photo.Caption = g.redact(photo.Caption, stats)
+	photo.Name = g.redact(photo.Name, stats)
+	g.report(photo.ThreadID, "photo", stats)
+	return g.TelegramGateway.SendPhoto(ctx, photo)
+}
+
 func (g *redactingGateway) EditText(ctx context.Context, messageID int, text string, html bool, buttons []domain.Button) error {
 	if !g.enabled() {
 		return g.TelegramGateway.EditText(ctx, messageID, text, html, buttons)

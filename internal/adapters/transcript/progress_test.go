@@ -1,8 +1,13 @@
 package transcript
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"image"
+	"image/png"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -172,5 +177,62 @@ func TestLastReplyPrefersExactSession(t *testing.T) {
 	reply, err = r.LastReply(context.Background(), domain.Agent{Kind: "claude", Cwd: cwd})
 	if err != nil || reply.Source != other {
 		t.Fatalf("newest file reply = %+v, %v", reply, err)
+	}
+}
+
+// pngBytes is a w×h PNG.
+func pngBytes(t *testing.T, w, h int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// imageResult is a user record whose tool result for id holds one base64
+// image.
+func imageResult(id, mediaType string, data []byte, sidechain bool) string {
+	return fmt.Sprintf(`{"type":"user","isSidechain":%t,"timestamp":"2026-10-02T15:04:05.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":%q,"content":[{"type":"image","source":{"type":"base64","media_type":%q,"data":%q}}]}]}}`,
+		sidechain, id, mediaType, base64.StdEncoding.EncodeToString(data))
+}
+
+func TestProgressSinceReadsToolImagesInOrder(t *testing.T) {
+	shot := pngBytes(t, 4, 3)
+	read := `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/repo/test-results/screenshots/landing-desktop.png"}}]}}`
+	mcp := `{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"m1","name":"mcp__playwright__browser_take_screenshot","input":{}}]}}`
+	attached := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + base64.StdEncoding.EncodeToString(shot) + `"}},{"type":"text","text":"look"}]}}`
+	broken := `{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"%%%"}}]}]}}`
+	path := progressFile(t,
+		progText1+"\n",
+		read+"\n", imageResult("r1", "image/png", shot, false)+"\n",
+		attached+"\n",
+		imageResult("r1", "image/png", shot, true)+"\n",
+		broken+"\n",
+		mcp+"\n", imageResult("m1", "image/jpeg", []byte("jpeg bytes"), false)+"\n",
+		imageResult("earlier", "image/png", shot, false)+"\n",
+		progText2+"\n")
+	got, _, err := testReader(t.TempDir()).ProgressSince(context.Background(), path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seq []string
+	for _, g := range got {
+		if g.Image != nil {
+			seq = append(seq, "img:"+g.Image.Name+":"+g.Image.MediaType)
+		} else {
+			seq = append(seq, g.Text)
+		}
+	}
+	want := []string{"Starting on the modal.", "img:landing-desktop.png:image/png", "img:browser_take_screenshot.jpg:image/jpeg",
+		"img:image.png:image/png", "Committed PureModal.", "Waiting on the app agent."}
+	if strings.Join(seq, "|") != strings.Join(want, "|") {
+		t.Fatalf("items = %q, want %q", seq, want)
+	}
+	if !bytes.Equal(got[1].Image.Data, shot) || got[1].Text != "" {
+		t.Errorf("image data = %d bytes, text %q", len(got[1].Image.Data), got[1].Text)
+	}
+	if !got[1].Written.Equal(time.Date(2026, 10, 2, 15, 4, 5, 0, time.UTC)) {
+		t.Errorf("written = %v", got[1].Written)
 	}
 }

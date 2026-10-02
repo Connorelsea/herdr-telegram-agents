@@ -85,6 +85,9 @@ func (o *Options) PostsDone() domain.DoneMode { return o.Get().PostsDone() }
 // PostsProgress is what the topic receives while an agent works.
 func (o *Options) PostsProgress() domain.ProgressMode { return o.Get().PostsProgress() }
 
+// PostsImages reports whether images an agent reads are posted.
+func (o *Options) PostsImages() bool { return o.Get().PostsImages() }
+
 // PostsChrome reports whether Claude Code's input frame is cut from
 // screen posts.
 func (o *Options) PostsChrome() bool { return o.Get().PostsChrome() }

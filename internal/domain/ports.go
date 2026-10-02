@@ -119,10 +119,21 @@ type ReplySource interface {
 }
 
 // ProgressText is one text part the agent wrote to its transcript while
-// working, in file order. Written is the record's timestamp.
+// working, or one image a tool returned to it, in file order. Written is
+// the record's timestamp. Exactly one of Text and Image is set.
 type ProgressText struct {
 	Text    string
+	Image   *ProgressImage
 	Written time.Time
+}
+
+// ProgressImage is an image a tool returned to the agent, such as a
+// screenshot Claude Code read, with the bytes the agent saw. Name is the
+// file's base name for a Read, else the tool's name.
+type ProgressImage struct {
+	Name      string
+	MediaType string
+	Data      []byte
 }
 
 // ProgressSource follows an agent's own session transcript while it works.
@@ -268,6 +279,10 @@ type TelegramGateway interface {
 	// SendDocument uploads one file into a topic, or into General when
 	// ThreadID is 0, as a single silent message.
 	SendDocument(ctx context.Context, doc Document) error
+	// SendPhoto posts one image into a topic as a single silent message,
+	// as a compressed photo when Telegram accepts its size and shape and as
+	// an image file otherwise. Name is the file name; Caption is plain text.
+	SendPhoto(ctx context.Context, photo Document) error
 	// React puts one emoji reaction on the operator's message; threadID is
 	// informational, Telegram addresses reactions by message id.
 	React(ctx context.Context, threadID, messageID int, emoji string) error
