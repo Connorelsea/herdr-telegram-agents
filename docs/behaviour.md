@@ -263,11 +263,15 @@ the status line shows. Claude Code and OpenCode only (for OpenCode the
   edited files are distinct paths from completed `edit` and `write` tools): a Codex pane, a
   pane without a working directory or one without a transcript directory
 posts as before and the log says why at debug (`turn meta unavailable`). In `Screen` mode
-the transcript is read for the line alone. A transcript last written
-before the turn's first `working` status belongs to an earlier turn (two
-Claude panes in one directory): its line is skipped and, in `Reply` /
-`Formatted` mode, the screen is posted instead with `stale transcript` in
-the `reply source unavailable` line.
+the transcript is read for the line alone. The agent's own session
+transcript (named by the session id Herdr reports) always counts as the
+current turn's. A transcript guessed as the newest of the directory and
+last written before the turn's first `working` status belongs to an
+earlier turn (two Claude panes in one directory): its line is skipped and,
+in `Reply` / `Formatted` mode, the screen is posted instead with `stale
+transcript` in the `reply source unavailable` line. The exact transcript is
+exempt because Herdr can flicker an agent to `working` just after it
+finished, which reopens the turn seconds after the last write.
 
 Long `Reply` and `Formatted` posts can arrive **folded** (`Fold long
 replies after` in the Posts group, default `20 lines`): every message part
@@ -423,7 +427,7 @@ The options today:
 | `Screen posts` | Quiet | Default `Silent`. What happens to blocked and done screens while at the desk: `Silent` posts without a sound (Telegram still shows a silent banner), `Held` posts nothing until you leave, `Normal` posts as usual. |
 | `Re-announce on leaving` | Quiet | Default on. When you leave, the screen of every agent still waiting for an answer is posted again with a sound, once per question. Off: only agents that have no post at all yet are posted. |
 | `Done post` | Posts | Default `Screen`. What a topic receives when its agent finishes: `Screen` posts the last 12 terminal lines in monospace; `Reply` posts the agent's last message from its Claude Code transcript (`~/.claude/projects/<cwd slug>/`: the pane's own session file when Herdr's integration reports its session id, else the newest session file) in monospace; `Formatted` renders that message: headings and bold, `•` lists, links, inline and fenced code, tables in monospace. A reply longer than five messages is cut with `… (+N chars)`. For OpenCode the message comes from the CLI export for the pane's session. Falls back to `Screen` for other agents or when no reply is found, see [Done posts](#done-posts). |
-| `Turn summary line` | Posts | Default on. Every done post (`Screen`, `Reply` and `Formatted`) ends with one line from the agent's transcript: `⏱ 4 min · fable-5-1 · ✏️ 3 files · ↑ 12k tokens` (turn duration, model, distinct files edited, output tokens). Claude Code and OpenCode only; without a transcript the post ends as before and the log has `turn meta unavailable` at debug. A transcript written before the turn began is skipped. Off: no line and, in `Screen` mode, no transcript read. See [Done posts](#done-posts). |
+| `Turn summary line` | Posts | Default on. Every done post (`Screen`, `Reply` and `Formatted`) ends with one line from the agent's transcript: `⏱ 4 min · fable-5-1 · ✏️ 3 files · ↑ 12k tokens` (turn duration, model, distinct files edited, output tokens). Claude Code and OpenCode only; without a transcript the post ends as before and the log has `turn meta unavailable` at debug. A guessed transcript written before the turn began is skipped. Off: no line and, in `Screen` mode, no transcript read. See [Done posts](#done-posts). |
 | `Fold long replies after` | Posts | Default `20 lines`. A `Reply` or `Formatted` done post whose message part has more lines than this arrives collapsed in Telegram's expandable quote: the first lines and an arrow that opens the rest; the summary line stays visible under it. `Off` never folds; `Screen` posts are never folded. Any integer of lines up to 1000 can be typed into `options.json`. See [Done posts](#done-posts). |
 | `Trim the input frame` | Posts | Default on. Every screen post (done and blocked screens, `/screen`, `/screen all`, the tails of the Claude Code commands, the pager's six lines) loses Claude Code's input frame at the bottom: the `─` rule, the empty `❯` row, the second rule, the status line (`… │ main ✓ │ 14%: …`) and the mode hint (`⏵⏵ auto mode on (shift+tab to cycle)` or `? for shortcuts`). The cut walks up from the bottom and stops at the first line that is none of these, so a dialog and its options are never touched, a `❯` row with typed text is left alone and a screen without the frame (Codex, any other agent) passes through unchanged. The duplicate check runs after the cut, so a screen that differs only in the status line's clock is not posted twice. Off posts the screen as captured. |
 | `React to prompts` | Posts | Default off: prompts are delivered silently. On: 👀 on your message once the agent took the prompt, 👌 when that turn ends (done, or 5 s of idle). Telegram may ring for each reaction, which is why it is off. See [Turns and reactions](#turns-and-reactions). |

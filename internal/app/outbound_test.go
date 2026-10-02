@@ -1173,6 +1173,21 @@ func TestOutboundDoneStaleTranscript(t *testing.T) {
 	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Footer != "fable-5-1" || sent[0].Text != "Done. **All** tests pass." {
 		t.Fatalf("Sent = %+v", sent)
 	}
+	// The agent's own session transcript passes the guard even when Herdr
+	// reopened the turn after the last write (a working flicker after done).
+	f, a = metaFixture(t, domain.DoneReply)
+	f.replies.SetMeta(a.Key, domain.TurnMeta{Model: "claude-fable-5-1"}, f.clock.Now())
+	f.replies.SetExact(a.Key, true)
+	f.clock.Advance(7 * time.Second)
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusWorking)})
+	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusDone)})
+	f.fire(t, 1)
+	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != "Done. **All** tests pass." || sent[0].Footer != "fable-5-1" {
+		t.Fatalf("exact transcript: Sent = %+v", sent)
+	}
+	if strings.Contains(f.logBuf.String(), "stale transcript") {
+		t.Errorf("exact transcript judged stale: %s", f.logBuf.String())
+	}
 	// A transcript written after the turn started passes the guard.
 	f, a = metaFixture(t, domain.DoneReply)
 	f.out.Observe(AgentEvent{Kind: AgentChanged, Agent: f.setStatus(a, domain.StatusWorking)})

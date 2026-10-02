@@ -170,12 +170,12 @@ func TestLastReplyPrefersExactSession(t *testing.T) {
 	}
 	r := testReader(home)
 	reply, err := r.LastReply(context.Background(), domain.Agent{Kind: "claude", Cwd: cwd, SessionID: "mine"})
-	if err != nil || reply.Source != mine || reply.Text != "Starting on the modal." {
+	if err != nil || reply.Source != mine || reply.Text != "Starting on the modal." || !reply.Exact {
 		t.Fatalf("exact session reply = %+v, %v", reply, err)
 	}
 	// Without a session the newest file of the directory still answers.
 	reply, err = r.LastReply(context.Background(), domain.Agent{Kind: "claude", Cwd: cwd})
-	if err != nil || reply.Source != other {
+	if err != nil || reply.Source != other || reply.Exact {
 		t.Fatalf("newest file reply = %+v, %v", reply, err)
 	}
 }

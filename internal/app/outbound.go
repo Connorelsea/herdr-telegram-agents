@@ -605,9 +605,10 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force, idleCompleti
 	}
 	// The transcript is read for the reply text (Reply, Formatted) and,
 	// with posts.meta on, for the summary line under every done post. A
-	// transcript last written before the turn started belongs to an
-	// earlier turn (two Claude panes in one directory) and counts as
-	// unavailable. A failure costs the screen mode nothing but the line.
+	// guessed transcript (the newest of the directory) last written before
+	// the turn started belongs to an earlier turn (two Claude panes in one
+	// directory) and counts as unavailable. A failure costs the screen mode
+	// nothing but the line.
 	wantMeta := status == domain.StatusDone && o.meta() && o.replies != nil
 	var footer string
 	if !captured && (mode != domain.DoneScreen || wantMeta) {
@@ -1382,12 +1383,16 @@ func (o *outbound) replyScreen(ctx context.Context, key domain.Key) (string, boo
 	return text, true, nil
 }
 
-// freshReply reports whether r belongs to the current turn. No known turn
-// start or no known write time leaves nothing to compare, so it counts as
-// fresh; a reply written before the turn started belongs to an earlier
-// turn and is stale.
+// freshReply reports whether r belongs to the current turn. The agent's
+// own session transcript always does: the reader already takes only text
+// written after the last prompt, and comparing write times against the
+// turn start misfires when Herdr flickers the agent to working just after
+// it finished, which reopens the turn seconds after the last write. No
+// known turn start or no known write time leaves nothing to compare, so it
+// counts as fresh; a guessed reply written before the turn started belongs
+// to an earlier turn and is stale.
 func freshReply(hasTurn bool, turnStarted time.Time, r domain.Reply) bool {
-	if !hasTurn || turnStarted.IsZero() || r.Written.IsZero() {
+	if r.Exact || !hasTurn || turnStarted.IsZero() || r.Written.IsZero() {
 		return true
 	}
 	return !r.Written.Before(turnStarted)

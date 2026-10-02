@@ -77,8 +77,9 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	}
 	dir := filepath.Join(append([]string{home}, append(projectsDir, projectSlug(agent.Cwd))...)...)
 	path, modTime, candidates, err := "", time.Time{}, 0, error(nil)
-	if exact, info, ok := sessionTranscript(home, dir, agent.SessionID); ok {
-		path, modTime, candidates = exact, info.ModTime(), 1
+	exactPath, info, exact := sessionTranscript(home, dir, agent.SessionID)
+	if exact {
+		path, modTime, candidates = exactPath, info.ModTime(), 1
 	} else {
 		path, modTime, candidates, err = newestTranscript(dir)
 	}
@@ -104,7 +105,7 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 		r.log.Debug("[FIX] transcript read failed after the reply was found, stats are partial",
 			slog.String("chosen", filepath.Base(path)), slog.Int64("bytes", stats.bytes), slog.String("err", stats.readErr.Error()))
 	}
-	return domain.Reply{Text: text, Source: path, Age: age, Written: modTime, Meta: meta}, nil
+	return domain.Reply{Text: text, Source: path, Age: age, Written: modTime, Exact: exact, Meta: meta}, nil
 }
 
 // sessionTranscript finds the transcript of one known session: <id>.jsonl

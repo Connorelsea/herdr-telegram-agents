@@ -86,14 +86,18 @@ const (
 // Reply is an agent's last message taken from its own transcript. Text is
 // the raw Markdown as the agent wrote it. Source names the file it came
 // from, for logs only. Age is how long ago that file was last written and
-// Written the moment it was (zero when unknown); a file written before
-// the turn started belongs to an earlier turn. Meta is what the transcript
-// says about the turn that produced Text; every field may be empty.
+// Written the moment it was (zero when unknown). Exact is true when Source
+// is the agent's own session transcript, named by the session id Herdr
+// reports; false when it was the newest file of the agent's directory, a
+// guess that a file written before the turn started proves wrong. Meta is
+// what the transcript says about the turn that produced Text; every field
+// may be empty.
 type Reply struct {
 	Text    string
 	Source  string
 	Age     time.Duration
 	Written time.Time
+	Exact   bool
 	Meta    TurnMeta
 }
 

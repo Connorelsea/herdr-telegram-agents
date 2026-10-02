@@ -17,6 +17,7 @@ type FakeReplies struct {
 	replies map[domain.Key]string
 	metas   map[domain.Key]fakeMeta
 	errs    map[domain.Key]error
+	exact   map[domain.Key]bool
 	calls   []domain.Key
 }
 
@@ -29,7 +30,7 @@ type fakeMeta struct {
 // NewFakeReplies returns an empty source; unscripted keys answer
 // domain.ErrNoReply.
 func NewFakeReplies() *FakeReplies {
-	return &FakeReplies{now: time.Now, replies: map[domain.Key]string{}, metas: map[domain.Key]fakeMeta{}, errs: map[domain.Key]error{}}
+	return &FakeReplies{now: time.Now, replies: map[domain.Key]string{}, metas: map[domain.Key]fakeMeta{}, errs: map[domain.Key]error{}, exact: map[domain.Key]bool{}}
 }
 
 // SetNow replaces the clock behind the default Written of a reply scripted
@@ -56,6 +57,14 @@ func (f *FakeReplies) SetMeta(key domain.Key, meta domain.TurnMeta, written time
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.metas[key] = fakeMeta{meta: meta, written: written}
+}
+
+// SetExact marks the reply of key as read from the agent's own session
+// transcript rather than guessed from its directory.
+func (f *FakeReplies) SetExact(key domain.Key, exact bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exact[key] = exact
 }
 
 // Fail scripts an error for key; LastReply returns it as is.
@@ -88,6 +97,7 @@ func (f *FakeReplies) LastReply(_ context.Context, agent domain.Agent) (domain.R
 			r.Meta = m.meta
 			r.Written = m.written
 		}
+		r.Exact = f.exact[agent.Key]
 		return r, nil
 	}
 	return domain.Reply{}, fmt.Errorf("%w: not scripted for %s", domain.ErrNoReply, agent.Key)
