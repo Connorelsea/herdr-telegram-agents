@@ -23,8 +23,10 @@ type HerdrGateway interface {
 	AgentSession(ctx context.Context, paneID string) (domain.SessionTuple, error)
 }
 
-// NewHerdrGateway builds the Herdr adapter for the socket at path with the
-// daemon's default reconnect schedule.
+// NewHerdrGateway builds the Herdr adapter with the daemon's default
+// reconnect schedule. It follows every session of the Herdr config root
+// that holds the socket at path (the default server and each `herdr
+// --session NAME`), so one daemon serves all of them.
 func NewHerdrGateway(path string, log *slog.Logger) HerdrGateway {
-	return herdr.NewGateway(path, log, herdr.DefaultBackoff)
+	return herdr.NewMultiGateway(herdr.SessionSockets(path), log, herdr.DefaultBackoff)
 }
