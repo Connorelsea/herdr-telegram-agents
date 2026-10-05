@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,6 +35,24 @@ const (
 
 // projectsDir is Claude Code's transcript root, relative to the home.
 var projectsDir = []string{".claude", "projects"}
+
+// configDirGlob matches the config dirs of other Claude Code accounts run
+// with CLAUDE_CONFIG_DIR=~/.claude-NAME; each keeps its own projects dir.
+const configDirGlob = ".claude-*"
+
+// projectRoots lists every transcript root: ~/.claude/projects first, then
+// the projects dir of each ~/.claude-NAME config dir, by name.
+func projectRoots(home string) []string {
+	roots := []string{filepath.Join(append([]string{home}, projectsDir...)...)}
+	extra, _ := filepath.Glob(filepath.Join(home, configDirGlob, projectsDir[1]))
+	sort.Strings(extra)
+	for _, dir := range extra {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			roots = append(roots, dir)
+		}
+	}
+	return roots
+}
 
 // Reader implements domain.ReplySource for Claude Code transcripts.
 type Reader struct {
@@ -81,7 +100,7 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 	if exact {
 		path, modTime, candidates = exactPath, info.ModTime(), 1
 	} else {
-		path, modTime, candidates, err = newestTranscript(dir)
+		path, modTime, candidates, err = newestAcross(home, projectSlug(agent.Cwd))
 	}
 	if err != nil {
 		return domain.Reply{}, err
@@ -110,8 +129,9 @@ func (r *Reader) LastReply(ctx context.Context, agent domain.Agent) (domain.Repl
 
 // sessionTranscript finds the transcript of one known session: <id>.jsonl
 // in the pane's project directory, or in any project directory when the
-// session started elsewhere (the pane's cwd moved since). ok is false for
-// an unknown id or a missing file.
+// session started elsewhere (the pane's cwd moved since), under any
+// account's transcript root. ok is false for an unknown id or a missing
+// file.
 func sessionTranscript(home, dir, sessionID string) (string, os.FileInfo, bool) {
 	if sessionID == "" || strings.ContainsAny(sessionID, `/\`) || strings.HasPrefix(sessionID, ".") {
 		return "", nil, false
@@ -120,13 +140,39 @@ func sessionTranscript(home, dir, sessionID string) (string, os.FileInfo, bool) 
 	if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
 		return filepath.Join(dir, name), info, true
 	}
-	matches, _ := filepath.Glob(filepath.Join(append([]string{home}, append(projectsDir, "*", name)...)...))
-	for _, m := range matches {
-		if info, err := os.Stat(m); err == nil && info.Mode().IsRegular() {
-			return m, info, true
+	for _, root := range projectRoots(home) {
+		matches, _ := filepath.Glob(filepath.Join(root, "*", name))
+		for _, m := range matches {
+			if info, err := os.Stat(m); err == nil && info.Mode().IsRegular() {
+				return m, info, true
+			}
 		}
 	}
 	return "", nil, false
+}
+
+// newestAcross is newestTranscript over the project dir named slug under
+// every account's transcript root: the newest file wins and the candidates
+// add up. It fails with the first root's error when no root has one.
+func newestAcross(home, slug string) (path string, modTime time.Time, candidates int, err error) {
+	var firstErr error
+	for _, root := range projectRoots(home) {
+		p, mod, n, err := newestTranscript(filepath.Join(root, slug))
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		candidates += n
+		if path == "" || mod.After(modTime) {
+			path, modTime = p, mod
+		}
+	}
+	if path == "" {
+		return "", time.Time{}, 0, firstErr
+	}
+	return path, modTime, candidates, nil
 }
 
 // newestTranscript returns the most recently modified session file in dir

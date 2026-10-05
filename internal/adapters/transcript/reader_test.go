@@ -315,3 +315,50 @@ func TestLastReply(t *testing.T) {
 		t.Errorf("cancelled ctx err = %v", err)
 	}
 }
+
+// A session run with CLAUDE_CONFIG_DIR=~/.claude-NAME writes its transcripts
+// under that dir; the reader finds them there by session id and by cwd.
+func TestLastReplyInOtherConfigDir(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/Users/op/Projects/personal"
+	src, err := os.ReadFile(filepath.Join("testdata", "meta.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The work root has an older, unrelated transcript for the same cwd.
+	work := filepath.Join(home, ".claude", "projects", projectSlug(cwd))
+	personal := filepath.Join(home, ".claude-personal", "projects", projectSlug(cwd))
+	for _, dir := range []string{work, personal} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := filepath.Join(work, "old.jsonl")
+	path := filepath.Join(personal, "sess-1.jsonl")
+	for f, mod := range map[string]time.Time{
+		old:  time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
+		path: time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC),
+	} {
+		if err := os.WriteFile(f, src, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(f, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newReader(func() (string, error) { return home, nil }, time.Now, nil)
+
+	for name, agent := range map[string]domain.Agent{
+		"by session": {Kind: "claude", Cwd: "/Users/op/moved", SessionID: "sess-1"},
+		"by cwd":     {Kind: "claude", Cwd: cwd},
+	} {
+		reply, err := r.LastReply(context.Background(), agent)
+		if err != nil || reply.Source != path {
+			t.Errorf("%s: source = %q err = %v, want %q", name, reply.Source, err, path)
+		}
+	}
+	got, _, err := r.ProgressTranscript(context.Background(), domain.Agent{Kind: "claude", Cwd: cwd, SessionID: "sess-1"})
+	if err != nil || got != path {
+		t.Errorf("ProgressTranscript = %q %v, want %q", got, err, path)
+	}
+}
