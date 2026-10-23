@@ -1426,6 +1426,134 @@ func TestInboundAttachmentWhileBlockedIsStillPrompt(t *testing.T) {
 	}
 }
 
+// voiceNote is a voice note sent into topic 101 with a transcriber set up.
+func voiceNote(id int, caption string) domain.TopicAttachment {
+	at := attachment(101, id, domain.AttachmentVoice, "v1", "", caption, 9)
+	at.MIME = "audio/ogg"
+	return at
+}
+
+// withTranscriber gives the fixture's inbound a scripted transcriber.
+func (f *bridgeFixture) withTranscriber(text string, err error) *testkit.FakeTranscriber {
+	tr := testkit.NewFakeTranscriber(text)
+	tr.Set(text, err)
+	f.in.voice = tr
+	f.tg.SetFile("v1", []byte("oggbytes"))
+	return tr
+}
+
+func TestInboundVoiceNoteTranscribedAndPrompted(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.reactionsOn(t)
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	tr := f.withTranscriber("fix the header", nil)
+	if err := f.in.HandleAttachment(f.ctx, voiceNote(50, "")); err != nil {
+		t.Fatal(err)
+	}
+	if calls := tr.Calls(); len(calls) != 1 || calls[0] != "/state/inbox/20260902-120000-50-voice.ogg" {
+		t.Fatalf("Transcribe calls = %q", calls)
+	}
+	// The note is kept in the inbox as the record of what was said.
+	if saved := f.inbox.Saved(); len(saved) != 1 || string(saved[0].Data) != "oggbytes" {
+		t.Fatalf("Saved = %+v", saved)
+	}
+	assertCallsEqual(t, f.tg, "download:v1:20971520", "send:101:🎙️ fix the header:reply=50", "react:101:50:👀")
+	if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != "p1: fix the header" {
+		t.Fatalf("Prompts = %q", prompts)
+	}
+}
+
+func TestInboundVoiceNoteCaptionLeadsThePrompt(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	f.withTranscriber("fix the header", nil)
+	if err := f.in.HandleAttachment(f.ctx, voiceNote(51, "about the landing page")); err != nil {
+		t.Fatal(err)
+	}
+	assertCallsEqual(t, f.tg, "download:v1:20971520", "send:101:🎙️ fix the header:reply=51")
+	if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != "p1: about the landing page\n\nfix the header" {
+		t.Fatalf("Prompts = %q", prompts)
+	}
+}
+
+func TestInboundVoiceNoteFailedTranscriptionSendsThePath(t *testing.T) {
+	cases := []struct {
+		name   string
+		text   string
+		err    error
+		notice string
+	}{
+		{"error", "", errors.New("model directory not found: /m"), "model directory not found: /m"},
+		{"silence", "   ", nil, voiceNoSpeech},
+		{"timeout", "", context.DeadlineExceeded, "timed out"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBridgeFixture(t)
+			f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+			f.withTranscriber(tc.text, tc.err)
+			id := 60 + i
+			if err := f.in.HandleAttachment(f.ctx, voiceNote(id, "")); err != nil {
+				t.Fatal(err)
+			}
+			assertCallsEqual(t, f.tg, "download:v1:20971520", fmt.Sprintf("send:101:⚠️ transcription failed: %s, sent the file instead:reply=%d", tc.notice, id))
+			want := fmt.Sprintf("p1: /state/inbox/20260902-120000-%d-voice.ogg", id)
+			if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != want {
+				t.Fatalf("Prompts = %q, want %q", prompts, want)
+			}
+		})
+	}
+}
+
+func TestInboundVoiceNoteWithoutTranscriberIsAFile(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	f.withTranscriber("", domain.ErrTranscriberMissing)
+	if err := f.in.HandleAttachment(f.ctx, voiceNote(70, "")); err != nil {
+		t.Fatal(err)
+	}
+	// No transcriber set up: the file goes over silently, as before.
+	assertCallsEqual(t, f.tg, "download:v1:20971520")
+	if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != "p1: /state/inbox/20260902-120000-70-voice.ogg" {
+		t.Fatalf("Prompts = %q", prompts)
+	}
+}
+
+func TestInboundVoiceNoteOptionOffSkipsTheTranscriber(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	tr := f.withTranscriber("fix the header", nil)
+	if err := f.opts.Set(f.ctx, domain.OptionInboxTranscribeVoice, "false", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.in.HandleAttachment(f.ctx, voiceNote(71, "")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(tr.Calls()); n != 0 {
+		t.Fatalf("transcriber ran with the option off: %d", n)
+	}
+	if prompts := f.herdr.Prompts(); len(prompts) != 1 || prompts[0] != "p1: /state/inbox/20260902-120000-71-voice.ogg" {
+		t.Fatalf("Prompts = %q", prompts)
+	}
+}
+
+func TestInboundVoiceNoteDownloadFails(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.add(t, "p1", "t1", "reviewer", domain.StatusIdle)
+	tr := f.withTranscriber("fix the header", nil)
+	f.tg.FailNext("download", errors.New("download: status 502"))
+	if err := f.in.HandleAttachment(f.ctx, voiceNote(72, "")); err != nil {
+		t.Fatal(err)
+	}
+	assertCallsEqual(t, f.tg, "download:v1:20971520", "send:101:⚠️ download failed: download: status 502:reply=72")
+	if n := len(tr.Calls()); n != 0 {
+		t.Fatalf("transcribed a failed download: %d", n)
+	}
+	if n := len(f.herdr.Prompts()); n != 0 {
+		t.Fatalf("prompted after a failed download: %d", n)
+	}
+}
+
 func opCmd(id int, text string) domain.GeneralCommand {
 	return domain.GeneralCommand{MessageID: id, FromID: 1, Text: text, Role: domain.RoleOperator}
 }

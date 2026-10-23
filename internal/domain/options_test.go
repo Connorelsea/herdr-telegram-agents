@@ -168,6 +168,7 @@ func TestOptionGroupsAndSpecs(t *testing.T) {
 		{OptionInboxEnabled, KindBool, "true", ""},
 		{OptionInboxMaxMB, KindChoice, "20", ChoiceSourceMegabytes},
 		{OptionInboxDeleteAfterDays, KindChoice, "7", ChoiceSourceDays},
+		{OptionInboxTranscribeVoice, KindBool, "true", ""},
 	}
 	if len(inbox) != len(wantInbox) {
 		t.Fatalf("inbox options = %+v", inbox)

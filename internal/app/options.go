@@ -124,6 +124,9 @@ func (o *Options) InboxMaxBytes() int64 { return o.Get().InboxMaxBytes() }
 // InboxDeleteAfter mirrors domain.Options.InboxDeleteAfter.
 func (o *Options) InboxDeleteAfter() time.Duration { return o.Get().InboxDeleteAfter() }
 
+// TranscribeVoice mirrors domain.Options.TranscribeVoice.
+func (o *Options) TranscribeVoice() bool { return o.Get().TranscribeVoice() }
+
 // Choices lists the allowed values of a choice source; nil when unknown.
 // Lists the domain owns (the day counts) are answered without asking the
 // external source.

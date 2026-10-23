@@ -129,9 +129,11 @@ type inbound struct {
 	deb     *debouncer
 	pending map[domain.Key]followUp
 	// git runs /git in the agent's directory; inbox keeps attachments.
-	// Either may be nil, which refuses the feature with a notice.
+	// Either may be nil, which refuses the feature with a notice. voice
+	// transcribes voice notes; nil hands them over as paths.
 	git   domain.GitRunner
 	inbox domain.InboxStore
+	voice domain.Transcriber
 	// closing is the message id of the active /close question per agent;
 	// a newer question retires the older one. Bridge goroutine only.
 	closing map[domain.Key]int
@@ -164,7 +166,7 @@ func newInbound(herdr domain.HerdrGateway, tg domain.TelegramGateway, topics *to
 	}
 	in := &inbound{
 		herdr: herdr, tg: tg, topics: topics, agents: agents, live: live, out: out,
-		git: svc.Git, inbox: svc.Inbox,
+		git: svc.Git, inbox: svc.Inbox, voice: svc.Transcriber,
 		opts: opts, panel: newPanel(opts, tg, log),
 		cfg: cfg, store: svc.Config, log: log,
 		chrome:  opts.PostsChrome,
@@ -188,6 +190,8 @@ func (i *inbound) asyncDone(ctx context.Context, job any) error {
 		return i.StartFinished(ctx, j)
 	case inboxResult:
 		return i.InboxFinished(ctx, j)
+	case voiceResult:
+		return i.VoiceFinished(ctx, j)
 	}
 	return nil
 }
@@ -988,6 +992,10 @@ func (i *inbound) HandleAttachment(ctx context.Context, at domain.TopicAttachmen
 			slog.Int64("size", at.Size), slog.Int64("max", max))
 		return i.reply(ctx, at.ThreadID, at.MessageID, fmt.Sprintf(inboxTooBigFmt, humanBytes(at.Size), humanBytes(max)))
 	}
+	if at.Kind == domain.AttachmentVoice && at.GroupID == "" && i.voice != nil && i.opts.TranscribeVoice() {
+		i.startVoice(key, at, max)
+		return nil
+	}
 	if at.GroupID == "" {
 		i.startDownload(key, at.ThreadID, at.MessageID, at.Caption, []domain.TopicAttachment{at}, max)
 		return nil
@@ -1087,6 +1095,96 @@ func (i *inbound) InboxFinished(ctx context.Context, r inboxResult) error {
 		return i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(inboxPartialFmt, len(r.failed), r.total, r.failed[0]))
 	}
 	return nil
+}
+
+// Replies of voice notes.
+const (
+	// voicePrefix marks the posted transcript as the operator's words, not
+	// the agent's.
+	voicePrefix    = "🎙️ "
+	voiceFailedFmt = "⚠️ transcription failed: %s, sent the file instead"
+	voiceNoSpeech  = "no speech recognized"
+)
+
+// voiceResult is the job a background voice note run submits: where the
+// note was saved and what the transcriber made of it. path is empty when
+// the download failed (fetchErr says why); err is the transcriber's error.
+type voiceResult struct {
+	key       domain.Key
+	threadID  int
+	messageID int
+	fromID    int64
+	caption   string
+	path      string
+	fetchErr  string
+	text      string
+	err       error
+	started   time.Time
+}
+
+// startVoice downloads and saves a voice note, then transcribes the saved
+// file, off the bridge goroutine; the outcome comes back as a voiceResult.
+func (i *inbound) startVoice(key domain.Key, at domain.TopicAttachment, max int64) {
+	started := i.clock.Now()
+	i.async(func(ctx context.Context) any {
+		r := voiceResult{key: key, threadID: at.ThreadID, messageID: at.MessageID, fromID: at.FromID, caption: at.Caption, started: started}
+		path, err := i.fetch(ctx, key, at, max)
+		if err != nil {
+			r.fetchErr = failureReason(err)
+			return r
+		}
+		r.path = path
+		start := time.Now()
+		r.text, r.err = i.voice.Transcribe(ctx, path)
+		i.log.Info("voice transcription finished", slog.String("key", key.String()), slog.Int("message_id", at.MessageID),
+			slog.Int64("dur_ms", time.Since(start).Milliseconds()), slog.Int("chars", len(r.text)), slog.Any("err", r.err))
+		return r
+	})
+}
+
+// VoiceFinished posts a voice note's transcript under the note and hands
+// it to the agent as if the operator had typed it. A transcription that
+// failed or heard nothing is reported and the agent gets the saved file's
+// path instead, as with any attachment; a missing transcriber falls back
+// to the path without a notice. Only fatal Telegram errors are returned.
+func (i *inbound) VoiceFinished(ctx context.Context, r voiceResult) error {
+	if key, ok := i.topics.KeyForThread(r.threadID); ok {
+		r.key = key
+	}
+	if r.path == "" {
+		i.log.Warn("voice delivery failed", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID), slog.String("reason", r.fetchErr))
+		return i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(inboxFailedFmt, r.fetchErr))
+	}
+	asFile := inboxResult{key: r.key, threadID: r.threadID, messageID: r.messageID, caption: r.caption,
+		paths: []string{r.path}, total: 1, started: r.started}
+	text := strings.TrimSpace(r.text)
+	switch {
+	case errors.Is(r.err, domain.ErrTranscriberMissing):
+		i.log.Info("voice sent as file", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID), slog.String("reason", "no_transcriber"))
+		return i.InboxFinished(ctx, asFile)
+	case r.err != nil || text == "":
+		reason := voiceNoSpeech
+		if r.err != nil {
+			reason = failureReason(r.err)
+			if errors.Is(r.err, context.DeadlineExceeded) {
+				reason = "timed out"
+			}
+		}
+		i.log.Warn("voice sent as file", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID), slog.String("reason", reason))
+		if err := i.reply(ctx, r.threadID, r.messageID, fmt.Sprintf(voiceFailedFmt, reason)); err != nil {
+			return err
+		}
+		return i.InboxFinished(ctx, asFile)
+	}
+	i.log.Info("voice transcribed", slog.String("key", r.key.String()), slog.Int("message_id", r.messageID), slog.Int("chars", len(text)),
+		slog.Int64("elapsed_ms", i.clock.Now().Sub(r.started).Milliseconds()))
+	if err := i.reply(ctx, r.threadID, r.messageID, voicePrefix+text); err != nil {
+		return err
+	}
+	if caption := strings.TrimSpace(r.caption); caption != "" {
+		text = caption + "\n\n" + text
+	}
+	return i.HandleTopic(ctx, domain.TopicMessage{ThreadID: r.threadID, MessageID: r.messageID, FromID: r.fromID, Text: text})
 }
 
 // humanBytes words a size for a notice: whole megabytes above 10 MB, one

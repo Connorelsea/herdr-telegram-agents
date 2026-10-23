@@ -73,6 +73,9 @@ var (
 	ErrNotRepository = errors.New("not a git repository")
 	// ErrGitMissing means no git binary was found on PATH.
 	ErrGitMissing = errors.New("git is not installed")
+	// ErrTranscriberMissing means no voice transcriber is set up on this
+	// machine.
+	ErrTranscriberMissing = errors.New("no voice transcriber is set up")
 	// ErrInvalidObserver means an observer id cannot be added or removed:
 	// not a positive number, an operator, already an observer, or not an
 	// observer on removal. Wrapped with the reason.

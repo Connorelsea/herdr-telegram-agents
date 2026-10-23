@@ -438,6 +438,7 @@ The options today:
 | `Images` | Posts | Default off. On: an image a Claude Code agent's tool returns to it (a screenshot it reads) is posted into its topic as a silent photo, in order with the progress text, also when `Progress` is off. `Redact secrets` cannot mask an image. See [Images](#images). |
 | `Accept files` | Inbox | Default on. Photos, documents, voice notes, audio and video sent to a topic are saved to the inbox and the agent is prompted with the path. Off: such messages answer `⚠️ inbox is off (/options → Inbox)`. See [Inbox](#inbox). |
 | `Largest file` | Inbox | Default 20 MB, the most Telegram lets a bot download. A larger file answers `⚠️ file too big: <size> > <max>` before any download. Any integer of megabytes from 1 to 20 can be typed into `options.json`. |
+| `Transcribe voice` | Inbox | Default on. A voice note is transcribed on this machine, its text posted under it and sent to the agent like a typed message. Needs a `transcribe` program, see [Voice notes](#voice-notes). Off: voice notes reach the agent as file paths. |
 | `Delete files after` | Inbox | Default 7 days. Inbox files older than that are deleted once a day, at daemon start and when the option changes. `Off` keeps them. Any integer of days can be typed into `options.json`. |
 | `working` … `exited` | Appearance | The topic icon of each status and the emoji `/status` prints. Picking an emoji another status already uses answers `used by <status>` and changes nothing. A pick repaints every live topic at once (a `resync`), or when sync comes back on. |
 | `Redact secrets` | Privacy | Default on. Every text the daemon posts passes the redaction step described under [Secrets in posts](#secrets-in-posts). Off: raw text. A change applies to the next post. |
@@ -450,7 +451,7 @@ Values are saved in `options.json` next to `config.json` (mode 0600) as
 "posts.done": "screen", "posts.meta": true, "posts.fold": "20",
 "posts.chrome": true, "posts.reactions": false, "posts.pager": true,
 "posts.blocked_delay": "0", "inbox.enabled": true, "inbox.max_mb": "20",
-"inbox.delete_after_days": "7", "icons.working": "⚡", "privacy.redact": true,
+"inbox.delete_after_days": "7", "inbox.transcribe_voice": true, "icons.working": "⚡", "privacy.redact": true,
 "topics.delete_after_days": "30", "topics.notice_delay": "20", …}}`.
 Missing keys take their defaults and unknown keys survive a save. The file
 is read once at daemon start: edit it by hand and restart the daemon, or use
@@ -665,6 +666,33 @@ submitted`. Once a day, at daemon start and as soon as
 are deleted; subdirectories and files of a save in flight are left alone.
 `Off` keeps every file. The sweep logs `inbox sweep deleted=<n>`.
 
+### Voice notes
+
+With `Transcribe voice` on, a voice note (not an audio file, not one inside
+an album) is saved to the inbox like any file and then handed to the
+`transcribe` program in the plugin config dir, with the saved file's path as
+its only argument. What it prints on stdout is the transcript: the daemon
+posts it as a silent reply to the note, prefixed `🎙️`, and then treats it
+exactly like a message typed into the topic, so a short reply such as `yes`
+answers a blocked agent. A caption under the note comes first in the
+prompt, followed by a blank line and the transcript.
+
+The program is looked up on every voice note, so adding it needs no restart.
+Without one, voice notes go to the agent as file paths with no notice. When
+it fails (non-zero exit, the 3 minute limit, or nothing printed) the topic
+gets `⚠️ transcription failed: <reason>, sent the file instead`, where the
+reason is the last line the program wrote to stderr, and the agent gets the
+path. The log says `voice transcribed` or `voice sent as file`.
+
+`scripts/setup-voice.sh` installs a local transcriber: a Python virtualenv
+under the state dir with `onnx-asr` and `soundfile`, and a `transcribe`
+program running `scripts/transcribe-parakeet.py`. That script runs NVIDIA
+Parakeet TDT 0.6B v2 (int8 ONNX) on the CPU, English only, from the model
+directory the Handy app downloads on macOS, or from `PARAKEET_MODEL_DIR`.
+It decodes Telegram's OGG/Opus without ffmpeg; a one-minute note takes about
+2 s on Apple silicon, model load included. Any other program that takes a
+path and prints text works too.
+
 ## Operators and observers
 
 Two kinds of Telegram accounts may talk to the bot, both listed by user id
@@ -708,6 +736,8 @@ in `config.json`:
 | `mapping.json` | Herdr plugin state dir (`HERDR_PLUGIN_STATE_DIR`) | agent to topic mapping, the dashboard message id (`dashboard_message_id`), and pending creation markers; exited entries stay until topic cleanup confirms deletion |
 | `options.json` | config dir, mode 0600 | the `/options` choices |
 | `inbox/` | state dir, mode 0700, files 0600 | attachments sent to topics, swept daily after `Delete files after` |
+| `transcribe` | config dir, executable | optional voice note transcriber, written by `scripts/setup-voice.sh`; see [Voice notes](#voice-notes) |
+| `voice/venv/` | state dir | Python virtualenv of `scripts/setup-voice.sh` |
 | `daemon.pid` | state dir | pid of the running daemon |
 | `update.json` | state dir, mode 0600 | current or last update job, phases, source, versions, rollback data and notification state |
 | `update.lock/` | state dir | exclusive worker ownership; a dead owner can be recovered |

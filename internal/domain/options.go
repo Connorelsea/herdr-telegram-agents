@@ -144,6 +144,9 @@ const (
 	// OptionInboxDeleteAfterDays is the age at which inbox files are
 	// deleted; 0 keeps them.
 	OptionInboxDeleteAfterDays = "inbox.delete_after_days"
+	// OptionInboxTranscribeVoice sends voice notes to the agent as their
+	// transcript instead of as a file path.
+	OptionInboxTranscribeVoice = "inbox.transcribe_voice"
 	// ChoiceSourceMegabytes is the static list of file sizes offered for
 	// OptionInboxMaxMB (see MegabytesChoices).
 	ChoiceSourceMegabytes = "megabytes"
@@ -395,6 +398,14 @@ func buildOptionSpecs() []OptionSpec {
 			Default:     "7",
 			Choices:     ChoiceSourceDays,
 			Validate:    validateDays,
+		},
+		{
+			Key:         OptionInboxTranscribeVoice,
+			Group:       GroupInbox,
+			Title:       "Transcribe voice",
+			Description: "A voice note is transcribed on this machine: the text is posted under it and sent to the agent like a typed message. Needs a transcribe program in the plugin config directory; without one, or when it fails, the agent gets the file path. Off: always the path.",
+			Kind:        KindBool,
+			Default:     "true",
 		},
 	}
 	descriptions := map[Status]string{
@@ -922,6 +933,9 @@ func (o Options) DeleteAfter() time.Duration {
 
 // InboxEnabled is the attachment inbox switch.
 func (o Options) InboxEnabled() bool { return o.Bool(OptionInboxEnabled) }
+
+// TranscribeVoice is the voice note transcription switch.
+func (o Options) TranscribeVoice() bool { return o.Bool(OptionInboxTranscribeVoice) }
 
 // InboxMaxBytes is the largest attachment the inbox accepts, in bytes; the
 // Bot API cap for an unparsable value.

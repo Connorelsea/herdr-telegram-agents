@@ -314,6 +314,14 @@ type InboxStore interface {
 	Sweep(ctx context.Context, olderThan time.Duration) (int, error)
 }
 
+// Transcriber turns a saved voice note into text. Transcribe returns the
+// transcript of the audio file at path, trimmed; ErrTranscriberMissing when
+// no transcriber is set up on this machine, and context.DeadlineExceeded
+// when the transcriber's timeout passed.
+type Transcriber interface {
+	Transcribe(ctx context.Context, path string) (string, error)
+}
+
 // GitResult is what a git run printed. Output is stdout with trailing
 // whitespace trimmed; Truncated is set when the runner's cap cut it.
 type GitResult struct {

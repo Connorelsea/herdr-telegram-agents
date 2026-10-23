@@ -51,11 +51,13 @@ func (b *Bridge) RestoreUpdate(job domain.UpdateJob) {
 
 // Services are the optional machine-side helpers the bridge uses: the
 // agent's transcript for done posts, git for /git and the inbox for
-// attachments. A nil member disables that feature with a notice.
+// attachments. A nil member disables that feature with a notice; a nil
+// Transcriber hands voice notes over as paths, like any other file.
 type Services struct {
-	Replies domain.ReplySource
-	Git     domain.GitRunner
-	Inbox   domain.InboxStore
+	Replies     domain.ReplySource
+	Git         domain.GitRunner
+	Inbox       domain.InboxStore
+	Transcriber domain.Transcriber
 	// Config saves config.json when /observers changes the observer list;
 	// nil refuses the change with a notice.
 	Config        domain.ConfigStore
@@ -195,7 +197,7 @@ func (b *Bridge) SubmitContext(ctx context.Context, job any) error {
 	switch job.(type) {
 	case AgentEvent:
 		queue = b.jobs
-	case domain.TopicMessage, domain.TopicAttachment, domain.ButtonPressed, domain.GeneralCommand, domain.StrangerSeen, presenceAway, startResult, inboxResult, updateCheckResult, updateStartResult:
+	case domain.TopicMessage, domain.TopicAttachment, domain.ButtonPressed, domain.GeneralCommand, domain.StrangerSeen, presenceAway, startResult, inboxResult, voiceResult, updateCheckResult, updateStartResult:
 		queue = b.control
 	default:
 		b.log.Warn("bridge job of unknown type dropped", slog.String("type", fmt.Sprintf("%T", job)))
@@ -333,6 +335,9 @@ func (b *Bridge) handle(ctx context.Context, job any) {
 	case inboxResult:
 		b.log.Debug("bridge job", slog.String("kind", "inbox_result"), slog.Int("message_id", j.messageID), slog.Int("saved", len(j.paths)), slog.Int("failed", len(j.failed)))
 		b.run(ctx, "inbox_result", func(ctx context.Context) error { return b.in.InboxFinished(ctx, j) })
+	case voiceResult:
+		b.log.Debug("bridge job", slog.String("kind", "voice_result"), slog.Int("message_id", j.messageID), slog.Bool("saved", j.path != ""), slog.Int("chars", len(j.text)))
+		b.run(ctx, "voice_result", func(ctx context.Context) error { return b.in.VoiceFinished(ctx, j) })
 	case domain.GeneralCommand:
 		b.log.Debug("bridge job", slog.String("kind", "general_command"), slog.Int("message_id", j.MessageID), slog.String("role", j.Role.String()))
 		b.run(ctx, "general_command", func(ctx context.Context) error { return b.in.HandleGeneral(ctx, j) })
