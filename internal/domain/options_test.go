@@ -142,6 +142,7 @@ func TestOptionGroupsAndSpecs(t *testing.T) {
 		{OptionPostsMinSeconds, KindChoice, "0", ChoiceSourceSeconds},
 		{OptionPostsProgress, KindChoice, "live", ChoiceSourceProgress},
 		{OptionPostsImages, KindBool, "false", ""},
+		{OptionPostsRich, KindBool, "true", ""},
 	}
 	if len(posts) != len(wantPosts) {
 		t.Fatalf("posts options = %+v", posts)

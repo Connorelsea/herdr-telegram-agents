@@ -132,6 +132,8 @@ const (
 	// OptionPostsImages posts the images a Claude Code agent's tools
 	// return to it (a screenshot it read) into its topic.
 	OptionPostsImages = "posts.images"
+	// OptionPostsRich sends Markdown posts as rich messages.
+	OptionPostsRich = "posts.rich"
 	// ChoiceSourceProgress is the static list of ProgressMode values.
 	ChoiceSourceProgress = "progress"
 	// ChoiceSourceSeconds is the static list of second counts offered by
@@ -370,6 +372,14 @@ func buildOptionSpecs() []OptionSpec {
 			Description: "Post the images an agent looks at while it works, such as a screenshot it reads, into its topic as it reads them. Redact secrets cannot mask an image: it is sent as the agent saw it. Off (default): no images. Claude Code only.",
 			Kind:        KindBool,
 			Default:     "false",
+		},
+		{
+			Key:         OptionPostsRich,
+			Group:       GroupPosts,
+			Title:       "Rich formatting",
+			Description: "Send an agent's replies and progress as Telegram rich messages, which show tables, headings and lists as such. A message Telegram refuses goes out the old way. Off: Markdown is converted to plain Telegram formatting and tables are monospaced blocks.",
+			Kind:        KindBool,
+			Default:     "true",
 		},
 		{
 			Key:         OptionInboxEnabled,
@@ -996,6 +1006,9 @@ func (o Options) PostsProgress() ProgressMode {
 // PostsImages reports whether the images an agent's tools return to it
 // are posted into its topic.
 func (o Options) PostsImages() bool { return o.Bool(OptionPostsImages) }
+
+// PostsRich is the rich message switch for Markdown posts.
+func (o Options) PostsRich() bool { return o.Bool(OptionPostsRich) }
 
 // PostsDone is what the topic receives when an agent turns done;
 // DoneScreen for an unknown value.

@@ -115,6 +115,9 @@ type Gateway struct {
 	// notices are deleted, or noticeKeep to leave them in place; set from
 	// Config.NoticeDelay and replaced by SetNoticeDelay.
 	noticeDelay atomic.Int64
+	// rich sends Markdown as rich messages (SetRichMarkdown); off keeps
+	// every Markdown post on the HTML renderer.
+	rich atomic.Bool
 	// deleteWarned is set after the first failed service-message deletion
 	// so a missing right is reported once, not per edit.
 	deleteWarned atomic.Bool
@@ -163,6 +166,13 @@ func (g *Gateway) SetNoticeDelay(delay time.Duration, del bool) {
 	}
 	g.noticeDelay.Store(int64(delay))
 	g.log.Info("telegram notice delay set", slog.Int64("delay_ms", delay.Milliseconds()))
+}
+
+// SetRichMarkdown switches Markdown posts and edits between rich messages
+// (on) and the HTML renderer (off) for calls made from now on.
+func (g *Gateway) SetRichMarkdown(on bool) {
+	g.rich.Store(on)
+	g.log.Info("telegram rich markdown set", slog.Bool("on", on))
 }
 
 // SetAccess replaces the operator and observer lists for updates that
@@ -383,6 +393,96 @@ func (g *Gateway) SendDirect(ctx context.Context, userID int64, out domain.Outgo
 // cap; a part with more lines than Fold goes out inside an expandable
 // quote, the footer under it.
 func (g *Gateway) send(ctx context.Context, chatID int64, threadID int, out domain.Outgoing) (int, error) {
+	if out.Markdown && !out.Code && !out.HTML && g.rich.Load() {
+		return g.sendRich(ctx, chatID, threadID, out)
+	}
+	return g.sendHTML(ctx, chatID, threadID, out)
+}
+
+// sendRich posts Markdown as rich messages (sendRichMessage), which render
+// tables, headings and lists natively: split at richTextMax on fence
+// boundaries, MaxParts, ReplyTo, Buttons, ForceReply, Notify and the footer
+// as in sendHTML. A part that is to be folded, or that Telegram rejects as
+// a bad request, goes out through sendHTML instead, re-split at its
+// smaller limit, so rich formatting never costs a reply.
+func (g *Gateway) sendRich(ctx context.Context, chatID int64, threadID int, out domain.Outgoing) (int, error) {
+	footer := truncateFooter(out.Footer, footerMax)
+	parts, droppedParts, droppedChars := capParts(splitMarkdown(out.Text, richTextMax), out.MaxParts)
+	g.log.Debug("rich message split", slog.Int("thread_id", out.ThreadID), slog.Int("parts", len(parts)),
+		slog.Int("dropped_parts", droppedParts), slog.Int("dropped_chars", droppedChars))
+	lastID := 0
+	for i, part := range parts {
+		first, last := i == 0, i == len(parts)-1
+		folded := out.Fold > 0 && strings.Count(part, "\n")+1 > out.Fold
+		if !folded {
+			md := escapeRich(part)
+			if last {
+				md += richFooter(footer)
+			}
+			params := &bot.SendRichMessageParams{
+				ChatID:              chatID,
+				MessageThreadID:     threadID,
+				RichMessage:         models.InputRichMessage{Markdown: md},
+				DisableNotification: !out.Notify,
+			}
+			if first && out.ReplyTo != 0 {
+				params.ReplyParameters = &models.ReplyParameters{MessageID: out.ReplyTo, AllowSendingWithoutReply: true}
+			}
+			if last {
+				switch {
+				case len(out.Buttons) > 0:
+					params.ReplyMarkup = inlineKeyboard(out.Buttons)
+				case out.ForceReply:
+					params.ReplyMarkup = &models.ForceReply{ForceReply: true, Selective: true, InputFieldPlaceholder: forceReplyPlaceholder}
+				}
+			}
+			id, err := g.sendRichPart(ctx, params)
+			if err == nil {
+				lastID = id
+				g.log.Debug("sendRichMessage", slog.Int64("chat_id", chatID), slog.Int("thread_id", threadID), slog.Int("part", i+1),
+					slog.Int("parts", len(parts)), slog.Int("runes", utf8.RuneCountInString(part)), slog.Int("message_id", id))
+				continue
+			}
+			if !isBadRequest(err) {
+				g.log.Warn("sendRichMessage failed", slog.Int("thread_id", out.ThreadID), slog.Int("part", i+1), slog.Int("parts", len(parts)), slog.Any("err", err))
+				return 0, fmt.Errorf("sendRichMessage thread %d part %d/%d: %w", out.ThreadID, i+1, len(parts), err)
+			}
+			g.log.Warn("rich message rejected, sent as html", slog.Int("thread_id", out.ThreadID), slog.Int("part", i+1),
+				slog.Int("parts", len(parts)), slog.String("markdown_head", head(md, 200)), slog.Any("err", err))
+		}
+		sub := out
+		sub.Text, sub.MaxParts = part, 0
+		if !first {
+			sub.ReplyTo = 0
+		}
+		if !last {
+			sub.Buttons, sub.ForceReply, sub.Footer = nil, false, ""
+		}
+		id, err := g.sendHTML(ctx, chatID, threadID, sub)
+		if err != nil {
+			return 0, err
+		}
+		lastID = id
+	}
+	return lastID, nil
+}
+
+// sendRichPart sends one rich message through the queue and returns its id.
+func (g *Gateway) sendRichPart(ctx context.Context, params *bot.SendRichMessageParams) (int, error) {
+	id := 0
+	err := g.queue.Do(ctx, func(ctx context.Context) error {
+		msg, err := g.api.SendRichMessage(ctx, params)
+		if err == nil && msg != nil {
+			id = msg.ID
+		}
+		return translate(err)
+	})
+	return id, err
+}
+
+// sendHTML is send for every message that is not a rich one: plain text,
+// code, caller HTML, and Markdown rendered to Telegram HTML.
+func (g *Gateway) sendHTML(ctx context.Context, chatID int64, threadID int, out domain.Outgoing) (int, error) {
 	markdown := out.Markdown && !out.Code && !out.HTML
 	footer := truncateFooter(out.Footer, footerMax)
 	limit := textMax
@@ -571,10 +671,19 @@ func (g *Gateway) EditText(ctx context.Context, messageID int, text string, html
 		slog.Int("buttons", len(buttons)))
 }
 
-// EditMarkdown replaces the text of one of the bot's messages with rendered
-// Markdown, falling back to <pre> once when Telegram rejects the markup,
-// like Send does for a Markdown part. The keyboard is removed.
+// EditMarkdown replaces the text of one of the bot's messages with
+// Markdown: as a rich message when rich Markdown is on, else (or when
+// Telegram rejects the rich edit) rendered to HTML, falling back to <pre>
+// once when Telegram rejects the markup, like Send does for a Markdown
+// part. The keyboard is removed.
 func (g *Gateway) EditMarkdown(ctx context.Context, messageID int, text string) error {
+	if g.rich.Load() {
+		err := g.editRich(ctx, messageID, text)
+		if err == nil || !isBadRequest(err) {
+			return err
+		}
+		g.log.Warn("rich edit rejected, edited as html", slog.Int("message_id", messageID), slog.Any("err", err))
+	}
 	if utf16Len(text) > textMax {
 		text = string([]rune(text)[:textMax-1]) + "…"
 	}
@@ -584,6 +693,34 @@ func (g *Gateway) EditMarkdown(ctx context.Context, messageID int, text string) 
 		err = g.EditText(ctx, messageID, renderCode(text), true, nil)
 	}
 	return err
+}
+
+// editRich replaces a message with Markdown as a rich message, cut at
+// richTextMax. The keyboard is removed and "message is not modified" is
+// success.
+func (g *Gateway) editRich(ctx context.Context, messageID int, text string) error {
+	if utf8.RuneCountInString(text) > richTextMax {
+		text = string([]rune(text)[:richTextMax-1]) + "…"
+	}
+	params := &bot.EditMessageTextParams{
+		ChatID:      g.chatID,
+		MessageID:   messageID,
+		RichMessage: &models.InputRichMessage{Markdown: escapeRich(text)},
+	}
+	err := g.queue.Do(ctx, func(ctx context.Context) error {
+		_, err := g.api.EditMessageText(ctx, params)
+		return translate(err)
+	})
+	if errors.Is(err, ErrMessageNotModified) {
+		g.log.Debug("rich edit already in place", slog.Int("message_id", messageID))
+		return nil
+	}
+	if err != nil {
+		g.log.Warn("rich editMessageText failed", slog.Int("message_id", messageID), slog.Any("err", err))
+		return err
+	}
+	g.log.Debug("rich editMessageText", slog.Int("message_id", messageID), slog.Int("chars", utf8.RuneCountInString(text)))
+	return nil
 }
 
 // EditButtons replaces the inline keyboard of one of the bot's messages;

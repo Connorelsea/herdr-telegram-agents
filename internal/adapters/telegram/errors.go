@@ -133,6 +133,14 @@ func isMarkupError(err error) bool {
 	return strings.Contains(lower, "can't parse entities") || strings.Contains(lower, "message is too long")
 }
 
+// isBadRequest reports whether Telegram refused the call itself (400), as
+// opposed to the network, rate limits or rights: what a rich message falls
+// back from.
+func isBadRequest(err error) bool {
+	var api *APIError
+	return errors.As(err, &api) && api.Code == 400
+}
+
 // isRetryable reports whether the queue may run the same call again. It
 // accepts both raw library errors and translated ones. Client-side failures
 // (400, 401, 403, 404, 409, chat migration) and a cancelled context are

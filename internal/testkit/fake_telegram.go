@@ -488,6 +488,14 @@ func (f *FakeTelegram) SetStatusIcons(icons domain.StatusIcons) {
 	f.log.Debug("fake telegram icons", slog.String("working", icons.Working))
 }
 
+// SetRichMarkdown records "rich:<on>" in Settings.
+func (f *FakeTelegram) SetRichMarkdown(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings = append(f.settings, fmt.Sprintf("rich:%t", on))
+	f.log.Debug("fake telegram rich markdown", slog.Bool("on", on))
+}
+
 func (f *FakeTelegram) SetNoticeDelay(delay time.Duration, del bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

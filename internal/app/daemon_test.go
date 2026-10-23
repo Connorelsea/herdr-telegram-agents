@@ -1302,7 +1302,7 @@ func TestDaemonNoticeDelayApplied(t *testing.T) {
 	ctx := context.Background()
 	f.start(t)
 	f.waitCalls(t, 2)
-	if got := f.tg.Settings(); len(got) != 1 || got[0] != "noticedelay:20" {
+	if got := f.tg.Settings(); len(got) != 2 || got[0] != "noticedelay:20" || got[1] != "rich:true" {
 		t.Fatalf("settings after start = %v", got)
 	}
 	if err := f.opts.Set(ctx, domain.OptionNoticeDelay, "0", 1); err != nil {
@@ -1310,14 +1310,22 @@ func TestDaemonNoticeDelayApplied(t *testing.T) {
 	}
 	waitFor(t, "keep applied", func() bool {
 		s := f.tg.Settings()
-		return len(s) == 2 && s[1] == "noticedelay:keep"
+		return len(s) == 3 && s[2] == "noticedelay:keep"
 	})
 	if err := f.opts.Set(ctx, domain.OptionNoticeDelay, "60", 1); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "60 s applied", func() bool {
 		s := f.tg.Settings()
-		return len(s) == 3 && s[2] == "noticedelay:60"
+		return len(s) == 4 && s[3] == "noticedelay:60"
+	})
+	// posts.rich reaches the gateway on change as well.
+	if err := f.opts.Set(ctx, domain.OptionPostsRich, "false", 1); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "rich off applied", func() bool {
+		s := f.tg.Settings()
+		return len(s) == 5 && s[4] == "rich:false"
 	})
 	if err := f.stop(t); err != nil {
 		t.Fatal(err)

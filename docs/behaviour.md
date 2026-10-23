@@ -358,6 +358,31 @@ local time it was read, for example `🖼 landing-desktop.png · 15:04`.
   but cannot mask an image: it is sent as the agent saw it. That is why
   `Images` is off by default.
 
+### Rich messages
+
+With `Rich formatting` on, every Markdown post (Reply and Formatted done
+posts, progress text, Live edits) goes out through `sendRichMessage` and
+edits through `editMessageText` with a rich message (Bot API 10.1,
+2026-06-11). Telegram's rich Markdown follows GitHub Flavored Markdown, so
+the agent's text is sent almost as written: pipe tables become real tables
+(alignment from the `:---` row kept), headings, lists, quotes and code
+blocks render as such. Parts split at 30000 characters instead of 4096.
+
+Rich Markdown reads some prose as markup, so outside code spans and fenced
+blocks the daemon escapes it first (measured against the live API on
+2026-10-22): `<` becomes `&lt;` (else `List<T>` loses `<T>`), `&` becomes
+`&amp;`, `$` becomes `\$` (else `$PATH and $HOME` turns into a formula),
+`==` and `||` are backslash-escaped (highlight, spoiler). Table rows keep
+their `|`. `2 * 3 * 4` still italicises the middle; that one is left.
+
+A part Telegram refuses with a 400 (too many blocks, syntax it rejects) is
+logged as `rich message rejected, sent as html` and sent through the old
+HTML conversion, re-split at 4096, so nothing is lost. A part that is to be
+folded (`Fold long replies after`) always takes the HTML path, because
+rich messages have no expandable quote for Markdown content. Screens,
+`/git` output and notices are not Markdown and are unaffected. Telegram
+apps older than the rich message release may not render these messages.
+
 ## Turns and reactions
 
 A **turn** is one exchange with an agent. It starts with the first
@@ -436,6 +461,7 @@ The options today:
 | `Skip short done posts` | Posts | Default `Off`. With `5s` … `120s`: the done post of a turn shorter than that is skipped (blocked time included; a turn whose start the daemon never saw posts). Blocked posts and reactions are unaffected. Any integer of seconds up to 3600 can be typed into `options.json`. See [Turns and reactions](#turns-and-reactions). |
 | `Progress` | Posts | Default `Live`. What a topic receives while its agent is still working: the text a Claude Code agent writes to its transcript before the turn ends. `Live` keeps one message per turn and edits new text into it, `Messages` posts each batch of new text as its own silent message, `Off` waits for the done post. See [Progress posts](#progress-posts). |
 | `Images` | Posts | Default off. On: an image a Claude Code agent's tool returns to it (a screenshot it reads) is posted into its topic as a silent photo, in order with the progress text, also when `Progress` is off. `Redact secrets` cannot mask an image. See [Images](#images). |
+| `Rich formatting` | Posts | Default on. Replies and progress text go out as Telegram rich messages, so tables, headings, lists and code blocks render natively. A message Telegram refuses goes out the old way. Off: the HTML conversion, with tables as monospaced blocks. See [Rich messages](#rich-messages). |
 | `Accept files` | Inbox | Default on. Photos, documents, voice notes, audio and video sent to a topic are saved to the inbox and the agent is prompted with the path. Off: such messages answer `⚠️ inbox is off (/options → Inbox)`. See [Inbox](#inbox). |
 | `Largest file` | Inbox | Default 20 MB, the most Telegram lets a bot download. A larger file answers `⚠️ file too big: <size> > <max>` before any download. Any integer of megabytes from 1 to 20 can be typed into `options.json`. |
 | `Transcribe voice` | Inbox | Default on. A voice note is transcribed on this machine, its text posted under it and sent to the agent like a typed message. Needs a `transcribe` program, see [Voice notes](#voice-notes). Off: voice notes reach the agent as file paths. |
@@ -450,7 +476,7 @@ Values are saved in `options.json` next to `config.json` (mode 0600) as
 "quiet.enabled": true, "quiet.idle_minutes": "3", "quiet.posts": "silent",
 "posts.done": "screen", "posts.meta": true, "posts.fold": "20",
 "posts.chrome": true, "posts.reactions": false, "posts.pager": true,
-"posts.blocked_delay": "0", "inbox.enabled": true, "inbox.max_mb": "20",
+"posts.blocked_delay": "0", "posts.rich": true, "inbox.enabled": true, "inbox.max_mb": "20",
 "inbox.delete_after_days": "7", "inbox.transcribe_voice": true, "icons.working": "⚡", "privacy.redact": true,
 "topics.delete_after_days": "30", "topics.notice_delay": "20", …}}`.
 Missing keys take their defaults and unknown keys survive a save. The file

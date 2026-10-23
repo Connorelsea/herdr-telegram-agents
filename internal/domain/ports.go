@@ -273,6 +273,10 @@ type TelegramGateway interface {
 	// is false. Notices already waiting keep their delay. Safe to call
 	// from any goroutine.
 	SetNoticeDelay(delay time.Duration, del bool)
+	// SetRichMarkdown says whether Markdown posts and edits made after the
+	// call go out as rich messages (native tables, headings and lists) or
+	// rendered to HTML. Safe to call from any goroutine.
+	SetRichMarkdown(on bool)
 	// SetAccess replaces the allow-lists for updates that arrive after the
 	// call: operators drive the agents, observers may only read and use
 	// /status and /help in General. Safe to call from any goroutine.

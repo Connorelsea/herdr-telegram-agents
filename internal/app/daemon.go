@@ -264,6 +264,9 @@ func NewDaemon(cfg domain.Config, herdr domain.HerdrGateway, tg domain.TelegramG
 	opts.OnChange(domain.OptionNoticeDelay, func(_ string, cur domain.Options) {
 		d.applyNoticeDelay(cur)
 	})
+	opts.OnChange(domain.OptionPostsRich, func(_ string, cur domain.Options) {
+		d.tg.SetRichMarkdown(cur.PostsRich())
+	})
 	opts.OnChange(domain.OptionDeleteAfterDays, func(_ string, cur domain.Options) {
 		if cur.DeleteAfter() <= 0 {
 			d.log.Info("stale topic cleanup switched off")
@@ -429,6 +432,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		slog.Bool("quiet_enabled", pst.Enabled), slog.Bool("presence_supported", pst.Supported), slog.String("quiet", pst.Word()))
 	d.tg.SetStatusIcons(d.opts.StatusIcons())
 	d.applyNoticeDelay(d.opts.Get())
+	d.tg.SetRichMarkdown(d.opts.Get().PostsRich())
 	if !d.opts.SyncEnabled() {
 		d.log.Warn("sync is off, mirror paused until it is switched on in /options")
 	}

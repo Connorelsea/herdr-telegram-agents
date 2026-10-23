@@ -7,8 +7,10 @@ import (
 	"unicode/utf16"
 )
 
-// Markdown rendering for Outgoing.Markdown: the agent's reply arrives as the
-// Markdown it wrote, and Telegram accepts only a small HTML subset (b, i,
+// Markdown rendering for Outgoing.Markdown when rich messages are off, or
+// for a part Telegram refused as a rich message (see rich.go): the agent's
+// reply arrives as the Markdown it wrote, and Telegram accepts only a small
+// HTML subset (b, i,
 // s, a, code, pre). The renderer is deliberately regex-based and lossy:
 // headings become bold, bullets become "•", quotes get a bar, tables stay
 // monospaced. Anything it does not understand is escaped text, so the
