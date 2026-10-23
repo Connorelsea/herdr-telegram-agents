@@ -149,17 +149,21 @@ func (a Agent) Label() string {
 }
 
 // Workspace is one Herdr workspace as /new sees it: the id the socket
-// wants and the label the operator types.
+// wants, the label the operator types and the named Herdr session it
+// belongs to (empty for the default session).
 type Workspace struct {
-	ID    string
-	Label string
+	ID      string
+	Label   string
+	Session string
 }
 
 // Tab is one Herdr tab as CreateTab returns it: the ids the socket wants,
-// the label Herdr chose and the root pane an agent may be started in.
+// the label Herdr chose, the root pane an agent may be started in and that
+// pane's working directory (empty when Herdr does not report it).
 type Tab struct {
 	ID          string
 	WorkspaceID string
 	Label       string
 	RootPaneID  string
+	Cwd         string
 }

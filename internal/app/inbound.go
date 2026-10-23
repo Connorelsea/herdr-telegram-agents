@@ -28,7 +28,7 @@ const helpText = `Commands
 /status: this agent's status; in General, every agent with a link to its topic
 /away [2h]: treat you as away until /here or for the given time, so Telegram gets everything (General only)
 /here: back to automatic presence (General only)
-/new <workspace> [kind]: start an agent in a new tab of that workspace (General only; kind defaults to claude)
+/new: tap a workspace to start claude in a new tab there; /new <workspace> [kind] picks by name (General only; kind defaults to claude)
 /options: settings and update check (General only)
 /observers [add|remove <id>]: list or change who may watch the group without driving agents (General only)
 /help: this list
@@ -62,11 +62,25 @@ const (
 	observersInGeneral = "observer commands live in General: " + domain.ObserversUsage
 	// Replies of /new: the workspace list, the two progress lines and the
 	// failures.
-	newWorkspacesFmt   = "workspaces: %s"
-	newNoWorkspaces    = "no workspaces"
-	newNoMatchFmt      = "no workspace named %q"
-	newManyFmt         = "%q matches %s"
-	newStartingFmt     = "starting %s in %s …"
+	newWorkspacesFmt  = "workspaces: %s"
+	newNoWorkspaces   = "no workspaces"
+	newNoMatchFmt     = "no workspace named %q"
+	newManyFmt        = "%q matches %s"
+	newStartingFmt    = "starting %s in %s …"
+	newStartingDirFmt = "starting %s in %s · %s …"
+	// newPickText heads the /new picker: one button per workspace starts
+	// the default agent kind there.
+	newPickText = "Start claude in:"
+	// newPrefix marks the callback data of the /new picker; newRefresh
+	// re-lists the workspaces, newPickPrefix plus a workspace id starts an
+	// agent in it.
+	newPrefix     = "n:"
+	newRefresh    = newPrefix + "r"
+	newPickPrefix = newPrefix + "w:"
+	// newPickRow is how many workspace buttons share a keyboard row.
+	newPickRow = 2
+	// maxCallbackData is Telegram's limit on a button's callback data.
+	maxCallbackData    = 64
 	newStartedFmt      = "started %s in %s (pane %s)"
 	newFailedFmt       = "⚠️ %s did not start in %s: %s"
 	newTabFailedPrefix = "⚠️ could not create a tab: "
@@ -703,10 +717,10 @@ func idList(ids []int64) string {
 	return strings.Join(parts, ", ")
 }
 
-// startAgent serves /new: resolves the workspace, opens a tab in it and
-// hands the slow agent.start to the background; the outcome arrives as a
-// startResult job and StartFinished words it. Only fatal Telegram errors
-// are returned.
+// startAgent serves /new: a bare /new sends the workspace picker, a label
+// resolves to one workspace and starts there through startIn, anything
+// else answers with the list and buttons to pick from. Only fatal Telegram
+// errors are returned.
 func (i *inbound) startAgent(ctx context.Context, cmd domain.GeneralCommand, parsed domain.Command) error {
 	i.log.Info("agent start requested", slog.Int64("from_id", cmd.FromID), slog.Int("message_id", cmd.MessageID),
 		slog.String("workspace", parsed.Workspace), slog.String("kind", parsed.AgentKind))
@@ -715,36 +729,148 @@ func (i *inbound) startAgent(ctx context.Context, cmd domain.GeneralCommand, par
 		i.log.Warn("workspace list failed", slog.String("err", err.Error()))
 		return i.reply(ctx, 0, cmd.MessageID, newListFailed+failureReason(err))
 	}
+	if strings.TrimSpace(parsed.Workspace) == "" {
+		return i.sendPicker(ctx, cmd.MessageID, workspaces)
+	}
 	ws, match := domain.MatchWorkspace(parsed.Workspace, workspaces)
 	i.log.Debug("workspace match", slog.String("label", parsed.Workspace), slog.Int("result", int(match)),
 		slog.Any("candidates", workspaceLabels(domain.MatchWorkspaces(parsed.Workspace, workspaces))))
 	if match != domain.MatchOne {
-		return i.reply(ctx, 0, cmd.MessageID, workspaceHint(parsed.Workspace, match, workspaces))
+		// An ambiguous label offers its candidates as buttons, an unknown
+		// one every workspace.
+		offer := workspaces
+		if match == domain.MatchMany {
+			offer = domain.MatchWorkspaces(parsed.Workspace, workspaces)
+		}
+		return i.absorb(i.send(ctx, domain.Outgoing{ThreadID: 0, Text: workspaceHint(parsed.Workspace, match, workspaces),
+			ReplyTo: cmd.MessageID, Buttons: pickerButtons(offer)}))
 	}
 	kind := parsed.AgentKind
 	if kind == "" {
 		kind = domain.DefaultAgentKind
 	}
+	return i.startIn(ctx, ws, kind, cmd.MessageID)
+}
+
+// sendPicker answers a bare /new with one button per workspace; with no
+// workspace at all it says so.
+func (i *inbound) sendPicker(ctx context.Context, replyTo int, workspaces []domain.Workspace) error {
+	buttons := pickerButtons(workspaces)
+	if len(workspaces) == 0 {
+		return i.reply(ctx, 0, replyTo, newNoWorkspaces)
+	}
+	i.log.Info("workspace picker sent", slog.Int("message_id", replyTo), slog.Int("workspaces", len(workspaces)), slog.Int("buttons", len(buttons)))
+	return i.absorb(i.send(ctx, domain.Outgoing{ThreadID: 0, Text: newPickText, ReplyTo: replyTo, Buttons: buttons}))
+}
+
+// startIn opens an unfocused tab in ws, says where it starts, and starts
+// an agent of kind in its root pane off the bridge goroutine; the outcome
+// is a reply to replyTo. Only fatal Telegram errors are returned.
+func (i *inbound) startIn(ctx context.Context, ws domain.Workspace, kind string, replyTo int) error {
 	tab, err := i.herdr.CreateTab(ctx, ws.ID)
 	if err != nil {
 		i.log.Warn("tab create failed", slog.String("workspace_id", ws.ID), slog.String("err", err.Error()))
-		return i.reply(ctx, 0, cmd.MessageID, newTabFailedPrefix+failureReason(err))
+		return i.reply(ctx, 0, replyTo, newTabFailedPrefix+failureReason(err))
 	}
 	i.log.Info("tab created", slog.String("workspace_id", ws.ID), slog.String("workspace", ws.Label),
-		slog.String("tab_id", tab.ID), slog.String("pane", tab.RootPaneID))
+		slog.String("tab_id", tab.ID), slog.String("pane", tab.RootPaneID), slog.String("cwd", tab.Cwd))
 	name := i.uniqueName(kind)
-	if err := i.reply(ctx, 0, cmd.MessageID, fmt.Sprintf(newStartingFmt, kind, ws.Label)); err != nil {
+	starting := fmt.Sprintf(newStartingFmt, kind, ws.Label)
+	if tab.Cwd != "" {
+		starting = fmt.Sprintf(newStartingDirFmt, kind, ws.Label, tab.Cwd)
+	}
+	if err := i.reply(ctx, 0, replyTo, starting); err != nil {
 		return err
 	}
 	started := i.clock.Now()
 	i.async(func(ctx context.Context) any {
 		agent, err := i.herdr.StartAgent(ctx, name, kind, tab.RootPaneID, agentStartTimeout)
 		return startResult{
-			messageID: cmd.MessageID, workspace: ws.Label, kind: kind, name: name,
+			messageID: replyTo, workspace: ws.Label, kind: kind, name: name,
 			paneID: tab.RootPaneID, agent: agent, err: err, started: started,
 		}
 	})
 	return nil
+}
+
+// PressNew serves a button of the /new picker (callback data with the new
+// prefix). Refresh re-lists the workspaces into the same message; a
+// workspace button starts the default agent kind there, the picker stays
+// for the next start. A workspace that has closed since the list was sent
+// refreshes the buttons instead. Every path answers the callback. Only
+// fatal Telegram errors are returned.
+func (i *inbound) PressNew(ctx context.Context, ev domain.ButtonPressed) error {
+	i.log.Info("new button pressed", slog.Int("message_id", ev.MessageID), slog.Int64("from_id", ev.FromID), slog.String("data", ev.Data))
+	workspaces, err := i.herdr.ListWorkspaces(ctx)
+	if err != nil {
+		i.log.Warn("workspace list failed", slog.String("err", err.Error()))
+		return i.out.answer(ctx, ev.CallbackID, newListFailed+failureReason(err))
+	}
+	refresh := func(toast string) error {
+		text := newPickText
+		if len(workspaces) == 0 {
+			text = newNoWorkspaces
+		}
+		if err := i.out.absorbEdit(domain.Key{}, i.tg.EditText(ctx, ev.MessageID, text, false, pickerButtons(workspaces))); err != nil {
+			return err
+		}
+		return i.out.answer(ctx, ev.CallbackID, toast)
+	}
+	if ev.Data == newRefresh {
+		return refresh("updated")
+	}
+	id, ok := strings.CutPrefix(ev.Data, newPickPrefix)
+	if !ok {
+		i.log.Warn("new button data unknown", slog.String("data", ev.Data))
+		return i.out.stale(ctx, ev, "unknown button")
+	}
+	for _, ws := range workspaces {
+		if ws.ID != id {
+			continue
+		}
+		if err := i.out.answer(ctx, ev.CallbackID, fmt.Sprintf("starting %s in %s", domain.DefaultAgentKind, ws.Label)); err != nil {
+			return err
+		}
+		return i.startIn(ctx, ws, domain.DefaultAgentKind, ev.MessageID)
+	}
+	i.log.Info("new button for a closed workspace", slog.String("workspace_id", id), slog.Int("message_id", ev.MessageID))
+	return refresh("that workspace is gone")
+}
+
+// pickerButtons lays out one button per workspace, newPickRow per row, then
+// a refresh button on a row of its own. A label that several sessions
+// share gets its session name; a workspace whose callback data would pass
+// Telegram's limit is left out.
+func pickerButtons(workspaces []domain.Workspace) []domain.Button {
+	seen := map[string]int{}
+	for _, ws := range workspaces {
+		seen[strings.ToLower(workspaceName(ws))]++
+	}
+	var out []domain.Button
+	for _, ws := range workspaces {
+		data := newPickPrefix + ws.ID
+		if len(data) > maxCallbackData {
+			continue
+		}
+		text := workspaceName(ws)
+		if seen[strings.ToLower(text)] > 1 {
+			session := ws.Session
+			if session == "" {
+				session = "default"
+			}
+			text += " · " + session
+		}
+		out = append(out, domain.Button{Text: text, Data: data, Row: len(out)/newPickRow + 1})
+	}
+	return append(out, domain.Button{Text: "↻ Refresh", Data: newRefresh})
+}
+
+// workspaceName is the label a workspace shows, its id when it has none.
+func workspaceName(ws domain.Workspace) string {
+	if ws.Label != "" {
+		return ws.Label
+	}
+	return ws.ID
 }
 
 // StartFinished words the outcome of a background agent start as a reply
@@ -800,11 +926,7 @@ func workspaceHint(label string, match domain.MatchResult, workspaces []domain.W
 func workspaceLabels(workspaces []domain.Workspace) []string {
 	out := make([]string, 0, len(workspaces))
 	for _, ws := range workspaces {
-		label := ws.Label
-		if label == "" {
-			label = ws.ID
-		}
-		out = append(out, label)
+		out = append(out, workspaceName(ws))
 	}
 	return out
 }

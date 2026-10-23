@@ -150,7 +150,7 @@ func TestMultiGatewayMergesAndRoutes(t *testing.T) {
 	}
 
 	ws, err := m.ListWorkspaces(ctxT(t))
-	if err != nil || len(ws) != 2 || ws[1].ID != "agentArt|w1" {
+	if err != nil || len(ws) != 2 || ws[1].ID != "agentArt|w1" || ws[1].Session != "agentArt" || ws[0].Session != "" {
 		t.Fatalf("ListWorkspaces = %+v %v", ws, err)
 	}
 }

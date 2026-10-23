@@ -324,6 +324,10 @@ func (b *Bridge) handle(ctx context.Context, job any) {
 			b.run(ctx, "close_button", func(ctx context.Context) error { return b.in.PressClose(ctx, j) })
 			return
 		}
+		if strings.HasPrefix(j.Data, newPrefix) {
+			b.run(ctx, "new_button", func(ctx context.Context) error { return b.in.PressNew(ctx, j) })
+			return
+		}
 		b.run(ctx, "button", func(ctx context.Context) error { return b.out.Press(ctx, j) })
 	case domain.TopicMessage:
 		b.log.Debug("bridge job", slog.String("kind", "topic_message"), slog.Int("thread_id", j.ThreadID), slog.Int("message_id", j.MessageID))

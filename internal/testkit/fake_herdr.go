@@ -74,6 +74,7 @@ type FakeHerdr struct {
 	renames    []RenameCall
 	tabRenames []TabRenameCall
 	workspaces []domain.Workspace
+	tabCwd     string
 	tabs       []TabCall
 	starts     []StartCall
 	closed     []string
@@ -175,6 +176,14 @@ func (f *FakeHerdr) SetWorkspaces(workspaces []domain.Workspace) {
 	defer f.mu.Unlock()
 	f.workspaces = append([]domain.Workspace(nil), workspaces...)
 	f.log.Debug("fake herdr workspaces set", slog.Int("count", len(workspaces)))
+}
+
+// SetTabCwd scripts the working directory CreateTab reports for the new
+// tab's root pane.
+func (f *FakeHerdr) SetTabCwd(cwd string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tabCwd = cwd
 }
 
 // SetStartResult scripts the agent StartAgent answers; zero fields are
@@ -406,7 +415,7 @@ func (f *FakeHerdr) CreateTab(_ context.Context, workspaceID string) (domain.Tab
 	if err := f.fail("tab"); err != nil {
 		return domain.Tab{}, err
 	}
-	return domain.Tab{ID: "t-new", WorkspaceID: workspaceID, Label: "new", RootPaneID: "p-new"}, nil
+	return domain.Tab{ID: "t-new", WorkspaceID: workspaceID, Label: "new", RootPaneID: "p-new", Cwd: f.tabCwd}, nil
 }
 
 // StartAgent records the call, waits the scripted delay and answers the

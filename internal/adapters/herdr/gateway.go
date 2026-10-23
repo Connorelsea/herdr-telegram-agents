@@ -283,6 +283,7 @@ func (g *Gateway) CreateTab(ctx context.Context, workspaceID string) (domain.Tab
 		WorkspaceID: res.Tab.WorkspaceID,
 		Label:       strings.TrimSpace(res.Tab.Label),
 		RootPaneID:  res.RootPane.PaneID,
+		Cwd:         res.RootPane.Cwd,
 	}
 	g.log.Debug("herdr tab created",
 		slog.String("workspace_id", workspaceID),

@@ -597,7 +597,7 @@ func TestGatewayCreateTab(t *testing.T) {
 		return map[string]any{
 			"type":      "tab_created",
 			"tab":       map[string]any{"tab_id": "w1:t7", "workspace_id": "w1", "label": " Tab 7 "},
-			"root_pane": map[string]any{"pane_id": "w1:p7", "workspace_id": "w1", "tab_id": "w1:t7"},
+			"root_pane": map[string]any{"pane_id": "w1:p7", "workspace_id": "w1", "tab_id": "w1:t7", "cwd": "/home/me/app"},
 		}, nil
 	})
 	g := newGateway(t, s)
@@ -605,7 +605,7 @@ func TestGatewayCreateTab(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTab: %v", err)
 	}
-	want := domain.Tab{ID: "w1:t7", WorkspaceID: "w1", Label: "Tab 7", RootPaneID: "w1:p7"}
+	want := domain.Tab{ID: "w1:t7", WorkspaceID: "w1", Label: "Tab 7", RootPaneID: "w1:p7", Cwd: "/home/me/app"}
 	if tab != want {
 		t.Fatalf("CreateTab = %+v, want %+v", tab, want)
 	}

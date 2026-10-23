@@ -334,6 +334,7 @@ func (m *MultiGateway) ListWorkspaces(ctx context.Context) ([]domain.Workspace, 
 		}
 		for _, w := range ws {
 			w.ID = QualifyID(s.name, w.ID)
+			w.Session = s.name
 			out = append(out, w)
 		}
 	}

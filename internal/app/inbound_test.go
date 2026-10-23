@@ -950,17 +950,23 @@ func TestInboundNewListsWorkspaces(t *testing.T) {
 		t.Fatalf("/new without workspaces = %q", got)
 	}
 	f.herdr.SetWorkspaces([]domain.Workspace{{ID: "w1", Label: "Work"}, {ID: "w2", Label: "Web"}, {ID: "w3", Label: ""}})
-	if got := general(f, t, 2, "/new"); got != "workspaces: Work, Web, w3" {
-		t.Fatalf("/new = %q", got)
-	}
+	f.tg.Reset()
 	if got := general(f, t, 3, "/new zzz"); got != "no workspace named \"zzz\"\nworkspaces: Work, Web, w3" {
 		t.Fatalf("/new zzz = %q", got)
 	}
+	if got := buttonTexts(f.tg.Sent()[0].Buttons); got != "Work|Web|w3|↻ Refresh" {
+		t.Fatalf("/new zzz buttons = %q", got)
+	}
+	f.tg.Reset()
 	if got := general(f, t, 4, "/new w"); got != "\"w\" matches Work, Web and w3\nworkspaces: Work, Web, w3" {
 		t.Fatalf("/new w = %q", got)
 	}
-	if got := general(f, t, 5, "/new codex"); got != "workspaces: Work, Web, w3" {
-		t.Fatalf("/new codex = %q", got)
+	// An ambiguous label offers only its candidates.
+	f.herdr.SetWorkspaces([]domain.Workspace{{ID: "w1", Label: "Work"}, {ID: "w2", Label: "Web"}, {ID: "w4", Label: "Home"}})
+	f.tg.Reset()
+	general(f, t, 5, "/new w")
+	if got := buttonTexts(f.tg.Sent()[0].Buttons); got != "Work|Web|↻ Refresh" {
+		t.Fatalf("/new w buttons = %q", got)
 	}
 	f.herdr.FailNext("workspaces", domain.ErrDisconnected)
 	if got := general(f, t, 6, "/new Work"); got != "⚠️ herdr: herdr is unreachable" {
@@ -976,6 +982,96 @@ func TestInboundNewListsWorkspaces(t *testing.T) {
 	}
 	if sent := f.tg.Sent(); len(sent) != 1 || sent[0].Text != newInGeneral {
 		t.Fatalf("/new in topic: %+v", sent)
+	}
+}
+
+// buttonTexts joins a keyboard's button texts with "|".
+func buttonTexts(buttons []domain.Button) string {
+	texts := make([]string, 0, len(buttons))
+	for _, b := range buttons {
+		texts = append(texts, b.Text)
+	}
+	return strings.Join(texts, "|")
+}
+
+func newPress(id int, data string) domain.ButtonPressed {
+	return domain.ButtonPressed{CallbackID: "cb", ThreadID: 0, MessageID: id, FromID: 1, Data: data}
+}
+
+func TestInboundNewPicker(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.herdr.SetWorkspaces([]domain.Workspace{
+		{ID: "w1", Label: "Work"}, {ID: "w2", Label: "Web"}, {ID: "w3", Label: "Docs"},
+		{ID: "agentArt|w1", Label: "Work", Session: "agentArt"},
+	})
+	if err := f.in.HandleGeneral(f.ctx, opCmd(2, "/new")); err != nil {
+		t.Fatal(err)
+	}
+	assertCallsEqual(t, f.tg, "send:0:Start claude in::reply=2:buttons=5")
+	buttons := f.tg.Sent()[0].Buttons
+	want := []domain.Button{
+		{Text: "Work · default", Data: "n:w:w1", Row: 1}, {Text: "Web", Data: "n:w:w2", Row: 1},
+		{Text: "Docs", Data: "n:w:w3", Row: 2}, {Text: "Work · agentArt", Data: "n:w:agentArt|w1", Row: 2},
+		{Text: "↻ Refresh", Data: "n:r"},
+	}
+	if !reflect.DeepEqual(buttons, want) {
+		t.Fatalf("buttons = %+v", buttons)
+	}
+	if n := len(f.herdr.Tabs()); n != 0 {
+		t.Fatalf("the picker created a tab: %d", n)
+	}
+}
+
+func TestInboundNewPickerStartsClaude(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.herdr.SetWorkspaces([]domain.Workspace{{ID: "w1", Label: "Work"}, {ID: "agentArt|w3", Label: "Bug Fixes", Session: "agentArt"}})
+	f.herdr.SetTabCwd("/home/me/Projects/app")
+	f.herdr.SetStartResult(domain.Agent{Key: domain.Key{PaneID: "p-new", TerminalID: "term-new"}})
+	if err := f.in.PressNew(f.ctx, newPress(1000, "n:w:agentArt|w3")); err != nil {
+		t.Fatal(err)
+	}
+	if tabs := f.herdr.Tabs(); len(tabs) != 1 || tabs[0].WorkspaceID != "agentArt|w3" {
+		t.Fatalf("Tabs = %+v", tabs)
+	}
+	if starts := f.herdr.Starts(); len(starts) != 1 || starts[0].Kind != "claude" || starts[0].PaneID != "p-new" {
+		t.Fatalf("Starts = %+v", starts)
+	}
+	// The picker keeps its buttons for the next start.
+	assertCallsEqual(t, f.tg, "answer:cb:starting claude in Bug Fixes",
+		"send:0:starting claude in Bug Fixes · /home/me/Projects/app …:reply=1000",
+		"send:0:started claude in Bug Fixes (pane p-new):reply=1000")
+}
+
+func TestInboundNewPickerRefreshAndClosedWorkspace(t *testing.T) {
+	f := newBridgeFixture(t)
+	f.herdr.SetWorkspaces([]domain.Workspace{{ID: "w1", Label: "Work"}})
+	if err := f.in.PressNew(f.ctx, newPress(1000, "n:r")); err != nil {
+		t.Fatal(err)
+	}
+	assertCallsEqual(t, f.tg, "edittext:1000:Start claude in::buttons=2", "answer:cb:updated")
+	// A workspace closed since the picker was sent: refresh, start nothing.
+	f.tg.Reset()
+	if err := f.in.PressNew(f.ctx, newPress(1000, "n:w:w9")); err != nil {
+		t.Fatal(err)
+	}
+	assertCallsEqual(t, f.tg, "edittext:1000:Start claude in::buttons=2", "answer:cb:that workspace is gone")
+	if n := len(f.herdr.Tabs()); n != 0 {
+		t.Fatalf("a closed workspace got a tab: %d", n)
+	}
+	// Herdr down: the toast says so and the message is left alone.
+	f.tg.Reset()
+	f.herdr.FailNext("workspaces", domain.ErrDisconnected)
+	if err := f.in.PressNew(f.ctx, newPress(1000, "n:w:w1")); err != nil {
+		t.Fatal(err)
+	}
+	assertCallsEqual(t, f.tg, "answer:cb:⚠️ herdr: herdr is unreachable")
+}
+
+func TestPickerButtonsSkipsOversizedData(t *testing.T) {
+	long := strings.Repeat("s", 60) + "|w1"
+	got := pickerButtons([]domain.Workspace{{ID: long, Label: "Far"}, {ID: "w2", Label: "Near"}})
+	if buttonTexts(got) != "Near|↻ Refresh" {
+		t.Fatalf("buttons = %+v", got)
 	}
 }
 

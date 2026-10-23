@@ -208,6 +208,7 @@ type paneInfo struct {
 	PaneID      string `json:"pane_id"`
 	WorkspaceID string `json:"workspace_id"`
 	TabID       string `json:"tab_id"`
+	Cwd         string `json:"cwd"`
 }
 
 type tabCreatedResult struct {
