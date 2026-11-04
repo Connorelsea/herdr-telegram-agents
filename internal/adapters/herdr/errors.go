@@ -10,6 +10,11 @@ const codeNotFound = "not_found"
 // an agent is working.
 const codeNotIdle = "agent_not_idle"
 
+// codePaneBusy is returned by agent.start while the target pane is not at
+// an interactive shell prompt, which a just-created pane is not until its
+// shell has started.
+const codePaneBusy = "agent_pane_busy"
+
 // APIError is an error line returned by the Herdr server for a request.
 // Codes are Herdr's snake_case identifiers such as "not_found".
 type APIError struct {

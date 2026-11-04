@@ -292,8 +292,17 @@ func (g *Gateway) CreateTab(ctx context.Context, workspaceID string) (domain.Tab
 	return tab, nil
 }
 
+// shellReadyWait is how long StartAgent keeps retrying a pane that is not
+// at its shell prompt yet, polling every shellReadyPoll: a tab made by
+// tab.create answers agent_pane_busy until its shell has started.
+var (
+	shellReadyWait = 15 * time.Second
+	shellReadyPoll = 250 * time.Millisecond
+)
+
 // StartAgent starts an agent through agent.start and waits for Herdr to
 // detect it; the timeout is clamped into the bounds agent.start accepts.
+// A pane still starting its shell is retried for up to shellReadyWait.
 func (g *Gateway) StartAgent(ctx context.Context, name, kind, paneID string, timeout time.Duration) (domain.Agent, error) {
 	timeout = min(max(timeout, domain.StartAgentMinTimeout), domain.StartAgentMaxTimeout)
 	params := agentStartParams{Name: name, Kind: kind, PaneID: paneID, TimeoutMS: timeout.Milliseconds()}
@@ -303,7 +312,23 @@ func (g *Gateway) StartAgent(ctx context.Context, name, kind, paneID string, tim
 		slog.String("name", name),
 		slog.Int64("timeout_ms", params.TimeoutMS))
 	var res agentStartedResult
-	if err := g.call(ctx, "agent.start", paneID, params, &res); err != nil {
+	var err error
+	deadline := time.Now().Add(shellReadyWait)
+	for attempt := 1; ; attempt++ {
+		err = g.call(ctx, "agent.start", paneID, params, &res)
+		var apiErr *APIError
+		if err == nil || !errors.As(err, &apiErr) || apiErr.Code != codePaneBusy || time.Now().After(deadline) {
+			break
+		}
+		g.log.Debug("herdr agent start: pane not at a shell prompt yet",
+			slog.String("pane", paneID), slog.Int("attempt", attempt))
+		select {
+		case <-ctx.Done():
+			return domain.Agent{}, ctx.Err()
+		case <-time.After(shellReadyPoll):
+		}
+	}
+	if err != nil {
 		g.log.Warn("herdr agent start failed",
 			slog.String("pane", paneID),
 			slog.String("kind", kind),

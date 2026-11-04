@@ -651,6 +651,39 @@ func TestGatewayStartAgent(t *testing.T) {
 	}
 }
 
+func TestGatewayStartAgentWaitsForShellPrompt(t *testing.T) {
+	defer func(w, p time.Duration) { shellReadyWait, shellReadyPoll = w, p }(shellReadyWait, shellReadyPoll)
+	shellReadyWait, shellReadyPoll = 2*time.Second, 10*time.Millisecond
+	var calls atomic.Int32
+	s := testkit.NewNDJSONServer(t, nil)
+	s.Handle("agent.start", func(id string, params json.RawMessage) (any, *testkit.APIError) {
+		if calls.Add(1) < 3 {
+			return nil, &testkit.APIError{Code: "agent_pane_busy", Message: "agent target pane w1:p7 is not an available shell"}
+		}
+		return map[string]any{"type": "agent_started", "agent": map[string]any{
+			"pane_id": "w1:p7", "workspace_id": "w1", "tab_id": "w1:t7", "terminal_id": "term-7",
+			"agent": "claude", "agent_status": "idle", "name": "claude", "state_change_seq": 1,
+		}}, nil
+	})
+	g := newGateway(t, s)
+	agent, err := g.StartAgent(ctxT(t), "claude", "claude", "w1:p7", 30*time.Second)
+	if err != nil || agent.PaneID != "w1:p7" {
+		t.Fatalf("StartAgent = %+v, %v", agent, err)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("agent.start calls = %d, want 3", calls.Load())
+	}
+
+	// A pane that never reaches its prompt fails once the wait is over.
+	shellReadyWait = 50 * time.Millisecond
+	calls.Store(-1000)
+	_, err = g.StartAgent(ctxT(t), "claude", "claude", "w1:p7", 30*time.Second)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "agent_pane_busy" {
+		t.Fatalf("err = %v, want APIError agent_pane_busy", err)
+	}
+}
+
 func TestGatewayStartAgentErrorIsTagged(t *testing.T) {
 	s := testkit.NewNDJSONServer(t, nil)
 	s.Handle("agent.start", func(id string, params json.RawMessage) (any, *testkit.APIError) {
