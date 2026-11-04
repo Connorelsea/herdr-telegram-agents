@@ -134,6 +134,18 @@ func Env() (PluginEnv, error) {
 	return system.ReadEnv()
 }
 
+// SendImage asks the running daemon to post the image at path (absolute)
+// into the topic of the agent in the pane this command runs in, and
+// returns what it sent.
+func SendImage(ctx context.Context, path, caption string) (string, error) {
+	t, err := system.DefaultSendTarget()
+	if err != nil {
+		return "", err
+	}
+	pane := herdr.QualifyID(herdr.SessionOf(t.SocketPath), t.PaneID)
+	return system.SendImage(ctx, t.StateDir, pane, path, caption)
+}
+
 // SocketPath resolves the Herdr socket for commands that need nothing else.
 func SocketPath() (string, error) {
 	return system.DefaultSocketPath()
@@ -332,7 +344,8 @@ func BuildDaemon(ctx context.Context, env PluginEnv, cfg domain.Config, log *slo
 			Config:  state.NewConfigStore(env.ConfigDir, log),
 			Updates: BuildUpdateManager(env, log), UpdateJobs: state.NewUpdateStore(env.StateDir, log),
 			LaunchUpdate:  func(ctx context.Context, id string) (int, error) { return LaunchUpdateWorker(ctx, env, id, log) },
-			UpdateRunning: func() bool { return BuildSupervisor(env, log).Status().Running }}, clock, log)
+			UpdateRunning: func() bool { return BuildSupervisor(env, log).Status().Running },
+			Images:        system.NewImageFiles(log)}, clock, log)
 	if job, err := state.NewUpdateStore(env.StateDir, log).Load(ctx); err == nil {
 		bridge.RestoreUpdate(job)
 	} else if !os.IsNotExist(err) {

@@ -51,6 +51,8 @@ type Progress struct {
 	opts   *Options
 	clock  domain.Clock
 	log    *slog.Logger
+	// linked finds the images posted text names by path; nil finds none.
+	linked *linkedImages
 
 	states map[domain.Key]*progressState
 
@@ -337,6 +339,7 @@ func (p *Progress) post(ctx context.Context, key domain.Key, threadID int, st *p
 	if len(due) == 0 && !(final && st.msgID != 0) {
 		return nil
 	}
+	due = p.withLinked(ctx, key, due)
 	if mode == domain.ProgressMessages {
 		if len(due) == 0 {
 			return nil
@@ -410,6 +413,26 @@ func (p *Progress) post(ctx context.Context, key domain.Key, threadID int, st *p
 	p.log.Info("progress posted", slog.String("key", key.String()), slog.String("mode", string(mode)),
 		slog.Int("texts", len(due)), slog.Int("message_id", st.msgID), slog.Bool("final", final))
 	return nil
+}
+
+// withLinked puts the images each due text names by path right after
+// that text, so they are posted below it like an image the agent read.
+func (p *Progress) withLinked(ctx context.Context, key domain.Key, due []heldText) []heldText {
+	if p.linked == nil {
+		return due
+	}
+	out := make([]heldText, 0, len(due))
+	for _, h := range due {
+		out = append(out, h)
+		if h.Image != nil {
+			continue
+		}
+		for _, img := range p.linked.find(ctx, key, h.Text) {
+			image := img.Image
+			out = append(out, heldText{ProgressText: domain.ProgressText{Image: &image, Written: h.Written}, seen: h.seen})
+		}
+	}
+	return out
 }
 
 // edit brings the live message up to date. A message the operator deleted

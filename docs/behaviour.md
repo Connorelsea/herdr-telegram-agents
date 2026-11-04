@@ -358,6 +358,41 @@ local time it was read, for example `🖼 landing-desktop.png · 15:04`.
   but cannot mask an image: it is sent as the agent saw it. That is why
   `Images` is off by default.
 
+### Images named by path
+
+With `Image paths` on (the default), an image file a posted message names
+by its full path is posted as a photo below that message, so an agent can
+show you a screenshot by writing its path instead of reading the image
+again. It works in progress posts and in the done post when it carries the
+transcript reply; a done post taken from the screen does not count, because
+the screen shows tool calls that name files the agent only opened.
+
+- **Which paths.** An absolute path or one under `~/`, without spaces,
+  ending in `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp`, at the start of a
+  line or after a space, `(`, `[`, `<`, a quote, a backtick, `*` or `:`.
+  Plain text, code spans and `![alt](/path.png)` all work; a relative
+  path (`src/logo.png`) and a URL do not. Up to 10 per message.
+- **The file as it is now.** The file is read from disk when the message
+  is posted. A path to a missing file, a directory or a file over 20 MB
+  stays text.
+- **Once per version.** Each agent posts a file once until it changes: a
+  path named again for the same file is not posted again.
+- **Where it lands.** In progress posts the photo follows the text that
+  named it, as with [Images](#images); a path in the turn's last reply is
+  posted below the done post.
+- **Not redacted**, like any image.
+
+### Sending an image from a pane
+
+`herdr-tg send <image> [caption]`, run in an agent's pane (for example as
+a tool call), asks the running daemon to post that image into the agent's
+topic, whatever `Images` and `Image paths` say. A relative path is taken
+from the current directory; the caption defaults to `🖼 <name>`. It prints
+`sent <name> to <agent>`, or fails with a reason: not in a Herdr pane, no
+agent in the pane, no open topic, or the file is missing, too large or not
+an image. The same version is then not posted again when a later message
+names its path.
+
 ### Rich messages
 
 With `Rich formatting` on, every Markdown post (Reply and Formatted done
@@ -461,6 +496,7 @@ The options today:
 | `Skip short done posts` | Posts | Default `Off`. With `5s` … `120s`: the done post of a turn shorter than that is skipped (blocked time included; a turn whose start the daemon never saw posts). Blocked posts and reactions are unaffected. Any integer of seconds up to 3600 can be typed into `options.json`. See [Turns and reactions](#turns-and-reactions). |
 | `Progress` | Posts | Default `Live`. What a topic receives while its agent is still working: the text a Claude Code agent writes to its transcript before the turn ends. `Live` keeps one message per turn and edits new text into it, `Messages` posts each batch of new text as its own silent message, `Off` waits for the done post. See [Progress posts](#progress-posts). |
 | `Images` | Posts | Default off. On: an image a Claude Code agent's tool returns to it (a screenshot it reads) is posted into its topic as a silent photo, in order with the progress text, also when `Progress` is off. `Redact secrets` cannot mask an image. See [Images](#images). |
+| `Image paths` | Posts | Default on. An image file a posted message names by full path (`/Users/me/shot.png`, `~/shot.png`) is posted as a photo below it, once per version of the file. Off: paths stay text. See [Images named by path](#images-named-by-path). |
 | `Rich formatting` | Posts | Default on. Replies and progress text go out as Telegram rich messages, so tables, headings, lists and code blocks render natively. A message Telegram refuses goes out the old way. Off: the HTML conversion, with tables as monospaced blocks. See [Rich messages](#rich-messages). |
 | `Accept files` | Inbox | Default on. Photos, documents, voice notes, audio and video sent to a topic are saved to the inbox and the agent is prompted with the path. Off: such messages answer `⚠️ inbox is off (/options → Inbox)`. See [Inbox](#inbox). |
 | `Largest file` | Inbox | Default 20 MB, the most Telegram lets a bot download. A larger file answers `⚠️ file too big: <size> > <max>` before any download. Any integer of megabytes from 1 to 20 can be typed into `options.json`. |

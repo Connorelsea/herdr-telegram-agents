@@ -110,6 +110,16 @@ func SessionSockets(socketPath string) SocketFinder {
 	}
 }
 
+// SessionOf names the session socketPath belongs to: a named session's
+// socket (root/sessions/NAME/herdr.sock) gives NAME, anything else the
+// default session "".
+func SessionOf(socketPath string) string {
+	if m := sessionSocket.FindStringSubmatch(filepath.ToSlash(socketPath)); m != nil {
+		return m[2]
+	}
+	return ""
+}
+
 // QualifyID prefixes a Herdr id from session with the session name; ids of
 // the default session and empty ids are returned unchanged.
 func QualifyID(session, id string) string {

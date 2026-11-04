@@ -132,6 +132,9 @@ const (
 	// OptionPostsImages posts the images a Claude Code agent's tools
 	// return to it (a screenshot it read) into its topic.
 	OptionPostsImages = "posts.images"
+	// OptionPostsImagePaths posts the image files an agent names by full
+	// path in a message, as photos below that message.
+	OptionPostsImagePaths = "posts.image_paths"
 	// OptionPostsRich sends Markdown posts as rich messages.
 	OptionPostsRich = "posts.rich"
 	// ChoiceSourceProgress is the static list of ProgressMode values.
@@ -372,6 +375,14 @@ func buildOptionSpecs() []OptionSpec {
 			Description: "Post the images an agent looks at while it works, such as a screenshot it reads, into its topic as it reads them. Redact secrets cannot mask an image: it is sent as the agent saw it. Off (default): no images. Claude Code only.",
 			Kind:        KindBool,
 			Default:     "false",
+		},
+		{
+			Key:         OptionPostsImagePaths,
+			Group:       GroupPosts,
+			Title:       "Image paths",
+			Description: "When a message posted here names an image file by its full path (/Users/me/shot.png or ~/shot.png, no spaces), post that image as a photo below it, so an agent can show you a screenshot by naming it instead of reading it. Each version of a file is posted once per agent. Redact secrets cannot mask an image. Off: paths stay text.",
+			Kind:        KindBool,
+			Default:     "true",
 		},
 		{
 			Key:         OptionPostsRich,
@@ -1006,6 +1017,10 @@ func (o Options) PostsProgress() ProgressMode {
 // PostsImages reports whether the images an agent's tools return to it
 // are posted into its topic.
 func (o Options) PostsImages() bool { return o.Bool(OptionPostsImages) }
+
+// PostsImagePaths reports whether image files named by full path in a
+// posted message are posted as photos below it.
+func (o Options) PostsImagePaths() bool { return o.Bool(OptionPostsImagePaths) }
 
 // PostsRich is the rich message switch for Markdown posts.
 func (o Options) PostsRich() bool { return o.Bool(OptionPostsRich) }

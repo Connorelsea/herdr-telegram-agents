@@ -108,6 +108,7 @@ func runDaemon(rc *runContext, _ []string) int {
 		Stop:   requestStop,
 		Resync: d.Resync,
 		Status: func() string { return compose.StatsLine(statsWithPID(d.Stats(), os.Getpid()), time.Now()) },
+		Image:  d.SendImage,
 	}, log)
 	if err != nil {
 		log.Warn("control channel unavailable, signals only", slog.String("err", err.Error()))

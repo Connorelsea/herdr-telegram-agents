@@ -114,6 +114,14 @@ type TurnMeta struct {
 	OutputTokens int
 }
 
+// ImageFiles reads the image files agents name by path (see ImagePaths).
+// ReadImage expands a leading "~/" to the home directory and fails for a
+// missing file, one that is not a regular file, one without an image
+// extension and one too large to post.
+type ImageFiles interface {
+	ReadImage(ctx context.Context, path string) (ImageFile, error)
+}
+
 // ReplySource finds the last reply of an agent outside Herdr, in the
 // agent's own session transcript. It returns ErrNoReply, wrapped with the
 // reason, whenever nothing usable exists; the caller then falls back to

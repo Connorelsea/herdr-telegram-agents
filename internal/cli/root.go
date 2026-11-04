@@ -29,6 +29,7 @@ var documentedCommands = []struct{ name, help string }{
 	{"logs-pane", "[[panes]] overlay: tail of daemon.log"},
 	{"doctor-pane", "[[panes]] overlay: one line per diagnostic check"},
 	{"event", "[[events]] hook (fallback notifications)"},
+	{"send <image>", "post an image into this pane's agent topic"},
 }
 
 // command is one subcommand handler. It receives the arguments after the
@@ -92,6 +93,7 @@ func commands() map[string]command {
 		"doctor-pane":   runDoctorPane,
 		"event":         notImplemented("event"),
 		"dev":           runDev,
+		"send":          runSend,
 	}
 }
 

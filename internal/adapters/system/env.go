@@ -106,3 +106,52 @@ func InsideHerdr() bool {
 func DefaultSocketPath() (string, error) {
 	return SocketPath(os.LookupEnv, os.UserHomeDir)
 }
+
+// SendTarget is where `herdr-tg send` delivers: the pane it runs in, the
+// Herdr socket of that pane's session and the daemon's state directory.
+type SendTarget struct {
+	PaneID     string
+	SocketPath string
+	StateDir   string
+}
+
+// ReadSendTarget reads the environment of an agent's pane. Herdr passes
+// HERDR_PANE_ID and HERDR_SOCKET_PATH to every pane, but the plugin's
+// state directory only to plugin commands, so outside one it is the
+// default, $XDG_STATE_HOME (else ~/.local/state)/herdr/plugins/<id>.
+func ReadSendTarget(lookup Lookup, home func() (string, error)) (SendTarget, error) {
+	get := func(key string) string {
+		v, _ := lookup(key)
+		return v
+	}
+	t := SendTarget{PaneID: get("HERDR_PANE_ID"), StateDir: get("HERDR_PLUGIN_STATE_DIR")}
+	if t.PaneID == "" {
+		return t, fmt.Errorf("HERDR_PANE_ID is not set: run this inside an agent's pane in Herdr")
+	}
+	sock, err := SocketPath(lookup, home)
+	if err != nil {
+		return t, err
+	}
+	t.SocketPath = sock
+	if t.StateDir == "" {
+		root := get("XDG_STATE_HOME")
+		if root == "" {
+			dir, err := home()
+			if err != nil {
+				return t, fmt.Errorf("HERDR_PLUGIN_STATE_DIR unset and home dir unknown: %w", err)
+			}
+			root = filepath.Join(dir, ".local", "state")
+		}
+		id := get("HERDR_PLUGIN_ID")
+		if id == "" {
+			id = DefaultPluginID
+		}
+		t.StateDir = filepath.Join(root, "herdr", "plugins", id)
+	}
+	return t, nil
+}
+
+// DefaultSendTarget is ReadSendTarget over the real environment.
+func DefaultSendTarget() (SendTarget, error) {
+	return ReadSendTarget(os.LookupEnv, os.UserHomeDir)
+}

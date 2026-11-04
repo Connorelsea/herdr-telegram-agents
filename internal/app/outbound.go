@@ -66,6 +66,9 @@ type outbound struct {
 	// above which a transcript done post is sent collapsed (0 never).
 	meta func() bool
 	fold func() int
+	// linked finds the images a transcript reply names by path, posted
+	// below its done post; nil finds none.
+	linked *linkedImages
 
 	deb        *debouncer
 	threads    map[domain.Key]int
@@ -686,6 +689,9 @@ func (o *outbound) fire(ctx context.Context, key domain.Key, force, idleCompleti
 		return o.sendFailed(key, err)
 	}
 	o.lastPosted[key] = hash
+	if mode != domain.DoneScreen {
+		o.postLinked(ctx, key, entry.ThreadID, text)
+	}
 	if len(out.Buttons) > 0 {
 		o.keyboards[key] = keyboard{messageID: id, choices: dialog.Choices, multi: dialog.Multi, textEntry: dialog.TextEntry, textLabel: dialog.TextLabel,
 			cursor: dialog.Cursor, submitRow: dialog.SubmitRow}
@@ -1518,4 +1524,18 @@ func trimScreen(text string) string {
 func hashText(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
+}
+
+// postLinked posts the images a transcript reply names by path below its
+// done post. The post stands whatever happens to them: a failed photo is
+// logged and ends the batch.
+func (o *outbound) postLinked(ctx context.Context, key domain.Key, threadID int, text string) {
+	for _, img := range o.linked.find(ctx, key, text) {
+		doc := domain.Document{ThreadID: threadID, Name: img.Image.Name, Data: img.Image.Data, Caption: "🖼 " + img.Image.Name}
+		if err := o.tg.SendPhoto(ctx, doc); err != nil {
+			o.log.Warn("named image not posted", slog.String("key", key.String()), slog.String("path", img.Path), slog.String("err", err.Error()))
+			return
+		}
+		o.log.Info("named image posted", slog.String("key", key.String()), slog.String("path", img.Path), slog.Int("bytes", len(img.Image.Data)))
+	}
 }

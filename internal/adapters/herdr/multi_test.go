@@ -260,3 +260,15 @@ func waitReset(t *testing.T, m *MultiGateway) {
 		}
 	}
 }
+
+func TestSessionOf(t *testing.T) {
+	for path, want := range map[string]string{
+		"/home/u/.config/herdr/sessions/agentArt/herdr.sock": "agentArt",
+		"/home/u/.config/herdr/herdr.sock":                   "",
+		"/tmp/h.sock":                                        "",
+	} {
+		if got := SessionOf(path); got != want {
+			t.Errorf("SessionOf(%s) = %q, want %q", path, got, want)
+		}
+	}
+}

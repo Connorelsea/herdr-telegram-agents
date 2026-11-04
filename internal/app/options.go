@@ -88,6 +88,10 @@ func (o *Options) PostsProgress() domain.ProgressMode { return o.Get().PostsProg
 // PostsImages reports whether images an agent reads are posted.
 func (o *Options) PostsImages() bool { return o.Get().PostsImages() }
 
+// PostsImagePaths reports whether image files named by full path in a
+// posted message are posted below it.
+func (o *Options) PostsImagePaths() bool { return o.Get().PostsImagePaths() }
+
 // PostsChrome reports whether Claude Code's input frame is cut from
 // screen posts.
 func (o *Options) PostsChrome() bool { return o.Get().PostsChrome() }

@@ -49,6 +49,11 @@ agent as file paths. With a local transcriber set up
 (`sh scripts/setup-voice.sh`), a voice note is posted back as text and sent
 to the agent as if you had typed it.
 
+To show you an image, an agent can name it by full path in a message
+(`/Users/me/shot.png`): the image is posted as a photo below that message.
+`herdr-tg send <image> [caption]`, run in the agent's pane, posts one
+directly.
+
 For readable OpenCode replies, run `herdr integration install opencode` and
 make sure the `opencode` executable is on the plugin daemon's `PATH`. Without
 an exact session reference, `/screen` falls back to the visible terminal.

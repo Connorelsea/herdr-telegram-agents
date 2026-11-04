@@ -355,6 +355,13 @@ func (d *Daemon) SetInbox(inbox domain.InboxStore) { d.inbox = inbox }
 // posts go through the daemon's redacting gateway like every other post.
 func (d *Daemon) SetProgress(src domain.ProgressSource) {
 	d.progress = NewProgress(d.tg, src, d.registry.Live, d.reconciler.topics().Entry, d.opts, d.clock, d.log)
+	d.progress.linked = d.bridge.out.linked
+}
+
+// SendImage posts the image file at path into the topic of the agent in
+// paneID; see Bridge.SendImage. Safe from any goroutine.
+func (d *Daemon) SendImage(ctx context.Context, paneID, path, caption string) (string, error) {
+	return d.bridge.SendImage(ctx, paneID, path, caption)
 }
 
 // SweepNow asks the loop for a stale-topic sweep. It never blocks.

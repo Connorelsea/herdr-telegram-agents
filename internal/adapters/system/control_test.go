@@ -23,6 +23,7 @@ type controlFixture struct {
 	stops   int
 	resyncs int
 	status  string
+	images  []string
 	cancel  context.CancelFunc
 	done    chan struct{}
 }
@@ -54,6 +55,15 @@ func startControl(t *testing.T) *controlFixture {
 				f.mu.Lock()
 				defer f.mu.Unlock()
 				return f.status
+			},
+			Image: func(_ context.Context, pane, path, caption string) (string, error) {
+				if strings.HasSuffix(path, "missing.png") {
+					return "", errors.New("image " + path + ": no such file")
+				}
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				f.images = append(f.images, pane+"|"+path+"|"+caption)
+				return "sent " + path, nil
 			},
 		}, nil)
 	}()
@@ -89,6 +99,26 @@ func TestControlCommands(t *testing.T) {
 	}
 	if stops, resyncs := f.counts(); stops != 1 || resyncs != 1 {
 		t.Fatalf("handlers called stop=%d resync=%d", stops, resyncs)
+	}
+}
+
+func TestControlImage(t *testing.T) {
+	f := startControl(t)
+	ctx := context.Background()
+	reply, err := SendImage(ctx, f.dir, "agentArt|wA:p2", "/Users/Me/Shots/A.png", "after\tthe\nfix ")
+	if err != nil || reply != "sent /Users/Me/Shots/A.png" {
+		t.Fatalf("SendImage = %q, %v", reply, err)
+	}
+	if _, err := SendImage(ctx, f.dir, "w1:p1", "/tmp/missing.png", ""); err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("missing file err = %v", err)
+	}
+	if _, err := SendImage(ctx, f.dir, "w1:p1", "/tmp/a\tb.png", ""); err == nil {
+		t.Fatal("a tab in the path was sent")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.images) != 1 || f.images[0] != "agentArt|wA:p2|/Users/Me/Shots/A.png|after the fix" {
+		t.Fatalf("images = %q", f.images)
 	}
 }
 

@@ -84,3 +84,29 @@ func TestSocketPathWithoutHome(t *testing.T) {
 		t.Fatalf("err = %v, want wrapped %v", err, boom)
 	}
 }
+
+func TestReadSendTarget(t *testing.T) {
+	got, err := system.ReadSendTarget(lookupFrom(map[string]string{
+		"HERDR_PANE_ID":     "wA:p2",
+		"HERDR_SOCKET_PATH": "/home/u/.config/herdr/sessions/agentArt/herdr.sock",
+	}), home)
+	want := system.SendTarget{PaneID: "wA:p2", SocketPath: "/home/u/.config/herdr/sessions/agentArt/herdr.sock",
+		StateDir: filepath.Join("/home/u", ".local", "state", "herdr", "plugins", system.DefaultPluginID)}
+	if err != nil || got != want {
+		t.Fatalf("ReadSendTarget = %+v, %v; want %+v", got, err, want)
+	}
+
+	got, err = system.ReadSendTarget(lookupFrom(map[string]string{
+		"HERDR_PANE_ID": "w1:p1", "XDG_STATE_HOME": "/xdg", "HERDR_PLUGIN_ID": "x.y",
+	}), home)
+	if err != nil || got.StateDir != filepath.Join("/xdg", "herdr", "plugins", "x.y") || got.SocketPath != filepath.Join("/home/u", ".config", "herdr", "herdr.sock") {
+		t.Fatalf("ReadSendTarget with XDG = %+v, %v", got, err)
+	}
+	got, _ = system.ReadSendTarget(lookupFrom(map[string]string{"HERDR_PANE_ID": "w1:p1", "HERDR_PLUGIN_STATE_DIR": "/state"}), home)
+	if got.StateDir != "/state" {
+		t.Fatalf("plugin state dir ignored: %+v", got)
+	}
+	if _, err := system.ReadSendTarget(lookupFrom(nil), home); err == nil || !strings.Contains(err.Error(), "HERDR_PANE_ID") {
+		t.Fatalf("outside a pane err = %v", err)
+	}
+}

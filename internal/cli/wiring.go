@@ -44,6 +44,7 @@ type wiring struct {
 	buildDoctor     func(env compose.PluginEnv, version string, log *slog.Logger) doctor
 	buildInspector  func(cfg domain.Config, log *slog.Logger) (domain.TelegramInspector, error)
 	sendTest        func(ctx context.Context, insp domain.TelegramInspector, version string, log *slog.Logger) (string, error)
+	sendImage       func(ctx context.Context, path, caption string) (string, error)
 }
 
 var wire = defaultWiring()
@@ -71,6 +72,7 @@ func defaultWiring() wiring {
 		},
 		buildInspector: compose.BuildInspector,
 		sendTest:       compose.SendTest,
+		sendImage:      compose.SendImage,
 	}
 }
 

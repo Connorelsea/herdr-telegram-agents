@@ -21,6 +21,8 @@ import (
 type Bridge struct {
 	out *outbound
 	in  *inbound
+	// images reads the files SendImage posts; nil refuses them.
+	images domain.ImageFiles
 	// jobs carries agent state. control preserves the order of
 	// operator actions and asynchronous results under load.
 	jobs    chan any
@@ -65,6 +67,9 @@ type Services struct {
 	UpdateJobs    domain.UpdateJobStore
 	LaunchUpdate  func(context.Context, string) (int, error)
 	UpdateRunning func() bool
+	// Images reads the image files agents name by path, for
+	// posts.image_paths and SendImage; nil turns both off.
+	Images domain.ImageFiles
 }
 
 // NewBridge wires the outbound and inbound use cases around the registry,
@@ -84,10 +89,12 @@ func NewBridge(cfg domain.Config, herdr domain.HerdrGateway, tg domain.TelegramG
 	// the raw gateway because topic names are agent labels.
 	tg = newRedactingGateway(tg, domain.NewRedactor(cfg.BotToken), opts.RedactEnabled, log)
 	out := newOutbound(herdr, tg, cfg.ChatID, cfg.OperatorIDs, topics, registry.Agent, registry.Live, capture, opts, svc.Replies, clock, log)
+	out.linked = newLinkedImages(svc.Images, opts.PostsImagePaths, log)
 	in := newInbound(herdr, tg, topics, registry.Agent, registry.Live, out, opts, svc, cfg, clock, log)
 	b := &Bridge{
 		out:         out,
 		in:          in,
+		images:      svc.Images,
 		jobs:        make(chan any, bridgeBuffer),
 		control:     make(chan any, bridgeBuffer),
 		fatal:       make(chan error, 1),
